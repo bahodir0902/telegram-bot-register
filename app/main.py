@@ -28,10 +28,15 @@ def build_dispatcher() -> Dispatcher:
     from aiogram import Dispatcher
     from aiogram.fsm.storage.memory import MemoryStorage
 
-    from app.bot.handlers import admin, contact, errors, start, subscription
+    from app.bot.handlers import admin, contact, errors, language, start, subscription
+    from app.bot.middleware import UserLanguageMiddleware
 
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.errors.register(errors.handle_update_error)
+    language_middleware = UserLanguageMiddleware()
+    dispatcher.message.middleware(language_middleware)
+    dispatcher.callback_query.middleware(language_middleware)
+    dispatcher.include_router(language.router)
     dispatcher.include_router(admin.router)
     dispatcher.include_router(subscription.router)
     dispatcher.include_router(contact.router)
@@ -65,12 +70,19 @@ async def run(*, check_only: bool = False) -> None:
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
 
+    from app.db.migrations import SchemaMigrationError
     from app.db.session import create_database
+    from app.services.channels import ChannelBootstrapError, bootstrap_initial_channel
 
     settings = load_settings_or_exit()
     settings.media_root.resolve().mkdir(parents=True, exist_ok=True)
     database = create_database(settings.database_path)
-    await database.initialize()
+    try:
+        await database.initialize()
+    except SchemaMigrationError as exc:
+        await database.close()
+        logger.error("Database migration failed: %s", exc)
+        raise SystemExit(2) from None
 
     if check_only:
         await database.close()
@@ -81,8 +93,13 @@ async def run(*, check_only: bool = False) -> None:
         token=settings.bot_token.get_secret_value(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dispatcher = build_dispatcher()
     try:
+        try:
+            await bootstrap_initial_channel(bot, settings, database.session_factory)
+        except ChannelBootstrapError as exc:
+            logger.error("Channel bootstrap failed: %s", exc)
+            raise SystemExit(2) from None
+        dispatcher = build_dispatcher()
         await bot.delete_webhook(drop_pending_updates=False)
         await dispatcher.start_polling(
             bot,

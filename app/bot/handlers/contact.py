@@ -1,11 +1,11 @@
 from aiogram import F, Router
 from aiogram.enums import ChatType
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message
 
-from app.bot.handlers.start import CONTACT_TEXT, send_subscription_prompt
-from app.bot.keyboards.user import contact_keyboard
-from app.config import Settings
+from app.bot.handlers.start import send_subscription_prompt
+from app.bot.keyboards.user import contact_keyboard, language_keyboard
 from app.db.session import AsyncSessionFactory
+from app.i18n import Language, tr, translated_values
 from app.services.users import (
     contact_belongs_to_user,
     normalize_phone_number,
@@ -19,7 +19,7 @@ router = Router(name="contact")
 @router.message(F.contact, F.chat.type == ChatType.PRIVATE)
 async def receive_contact(
     message: Message,
-    settings: Settings,
+    language: Language,
     session_factory: AsyncSessionFactory,
 ) -> None:
     sender = message.from_user
@@ -29,9 +29,8 @@ async def receive_contact(
 
     if not contact_belongs_to_user(contact.user_id, sender.id):
         await message.answer(
-            "That contact does not belong to your Telegram account. "
-            "Please use the button to share your own number.",
-            reply_markup=contact_keyboard(),
+            tr(language, "contact_wrong_owner"),
+            reply_markup=contact_keyboard(language),
         )
         return
 
@@ -39,8 +38,8 @@ async def receive_contact(
         normalized_phone = normalize_phone_number(contact.phone_number)
     except ValueError:
         await message.answer(
-            "Telegram returned an invalid phone number. Please try sharing it again.",
-            reply_markup=contact_keyboard(),
+            tr(language, "contact_invalid"),
+            reply_markup=contact_keyboard(language),
         )
         return
 
@@ -55,12 +54,15 @@ async def receive_contact(
         await verify_phone(session, sender.id, normalized_phone)
 
     await message.answer(
-        "✅ Phone number verified.",
-        reply_markup=ReplyKeyboardRemove(),
+        tr(language, "phone_verified"),
+        reply_markup=language_keyboard(),
     )
-    await send_subscription_prompt(message, sender, settings, session_factory)
+    await send_subscription_prompt(message, sender, language, session_factory)
 
 
-@router.message(F.text == "📱 Share phone number", F.chat.type == ChatType.PRIVATE)
-async def typed_contact_button(message: Message) -> None:
-    await message.answer(CONTACT_TEXT, reply_markup=contact_keyboard())
+@router.message(F.text.in_(translated_values("share_phone")), F.chat.type == ChatType.PRIVATE)
+async def typed_contact_button(message: Message, language: Language) -> None:
+    await message.answer(
+        tr(language, "contact_prompt"),
+        reply_markup=contact_keyboard(language),
+    )

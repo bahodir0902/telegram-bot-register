@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-EXPECTED_TABLES = frozenset({"media", "users"})
+from app.db.migrations import EXPECTED_COLUMNS, EXPECTED_TABLES, SCHEMA_VERSION
 
 
 class HealthcheckError(RuntimeError):
@@ -23,6 +23,11 @@ def check_database(path: Path) -> None:
             uri=True,
             timeout=2.0,
         ) as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version != SCHEMA_VERSION:
+                raise HealthcheckError(
+                    f"database schema version is {version}; expected {SCHEMA_VERSION}"
+                )
             rows = connection.execute(
                 "SELECT name FROM sqlite_schema WHERE type = 'table'"
             ).fetchall()
@@ -31,6 +36,15 @@ def check_database(path: Path) -> None:
             if missing_tables:
                 missing = ", ".join(sorted(missing_tables))
                 raise HealthcheckError(f"database schema is missing tables: {missing}")
+
+            for table, expected_columns in EXPECTED_COLUMNS.items():
+                columns = {
+                    str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")')
+                }
+                missing_columns = expected_columns - columns
+                if missing_columns:
+                    missing = ", ".join(sorted(missing_columns))
+                    raise HealthcheckError(f"database table {table} is missing columns: {missing}")
 
             result = connection.execute("PRAGMA quick_check(1)").fetchone()
             if result is None or result[0] != "ok":

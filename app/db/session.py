@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import (
 
 # Importing models registers ORM tables on Base.metadata before schema initialization.
 from app.db import models as _models  # noqa: F401
-from app.db.base import Base
+from app.db.migrations import migrate_schema
 
 AsyncSessionFactory = async_sessionmaker[AsyncSession]
 
@@ -42,7 +42,7 @@ class Database:
             await connection.exec_driver_sql("PRAGMA journal_mode=WAL")
             await connection.commit()
         async with self.engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+            await migrate_schema(connection)
 
     async def close(self) -> None:
         await self.engine.dispose()

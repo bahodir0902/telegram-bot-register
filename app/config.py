@@ -4,13 +4,13 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from app.validation import parse_channel_id, validate_channel_url
+
 BOT_TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
-CHANNEL_USERNAME_RE = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{4,31}$")
 
 
 class Settings(BaseSettings):
@@ -42,32 +42,18 @@ class Settings(BaseSettings):
     @field_validator("channel_id", mode="before")
     @classmethod
     def parse_channel_id(cls, value: object) -> int | str:
-        if isinstance(value, int):
-            if value == 0:
-                raise ValueError("CHANNEL_ID cannot be zero")
-            return value
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("CHANNEL_ID must be a Telegram numeric ID or @username")
-        cleaned = value.strip()
-        if cleaned.lstrip("-").isdigit():
-            parsed = int(cleaned)
-            if parsed == 0:
-                raise ValueError("CHANNEL_ID cannot be zero")
-            return parsed
-        if not CHANNEL_USERNAME_RE.fullmatch(cleaned):
-            raise ValueError("CHANNEL_ID must be a numeric ID or a valid @channel_username")
-        return cleaned
+        try:
+            return parse_channel_id(value)
+        except ValueError as exc:
+            raise ValueError(f"CHANNEL_ID {exc}") from exc
 
     @field_validator("channel_url")
     @classmethod
     def validate_channel_url(cls, value: str) -> str:
-        cleaned = value.strip()
-        parsed = urlparse(cleaned)
-        if parsed.scheme != "https" or parsed.hostname not in {"t.me", "telegram.me"}:
-            raise ValueError("CHANNEL_URL must be an https://t.me/... Telegram link")
-        if not parsed.path or parsed.path == "/":
-            raise ValueError("CHANNEL_URL must identify a Telegram channel")
-        return cleaned
+        try:
+            return validate_channel_url(value)
+        except ValueError as exc:
+            raise ValueError(f"CHANNEL_URL {exc}") from exc
 
     @field_validator("admin_ids", mode="before")
     @classmethod

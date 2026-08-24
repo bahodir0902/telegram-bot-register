@@ -8,6 +8,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User
+from app.i18n import DEFAULT_LANGUAGE, Language
 
 PHONE_DIGIT_RE = re.compile(r"\D")
 
@@ -60,6 +61,19 @@ async def upsert_user(
 
 async def get_user(session: AsyncSession, telegram_id: int) -> User | None:
     return await session.scalar(select(User).where(User.telegram_id == telegram_id))
+
+
+async def get_user_language(session: AsyncSession, telegram_id: int) -> Language:
+    value = await session.scalar(select(User.language_code).where(User.telegram_id == telegram_id))
+    return value or DEFAULT_LANGUAGE
+
+
+async def set_user_language(session: AsyncSession, telegram_id: int, language: Language) -> None:
+    await session.execute(
+        update(User)
+        .where(User.telegram_id == telegram_id)
+        .values(language_code=language, updated_at=datetime.now(UTC))
+    )
 
 
 async def verify_phone(session: AsyncSession, telegram_id: int, phone_number: str) -> None:

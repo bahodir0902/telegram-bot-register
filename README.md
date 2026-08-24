@@ -1,8 +1,8 @@
 # Telegram Registration Bot
 
-A small Telegram-native bot that verifies a user's own phone contact, checks membership in
-one configured channel, and delivers all active media. Administrators add and manage media
-entirely through the bot.
+A small multilingual Telegram-native bot that verifies a user's own phone contact, checks
+membership in every administrator-managed channel, and delivers all active media. Administrators
+manage channels and media entirely through the bot.
 
 ## Architecture
 
@@ -12,17 +12,17 @@ The application is one asynchronous Python process using:
 - SQLAlchemy 2 async ORM with aiosqlite;
 - one SQLite database configured with WAL, foreign keys, and a busy timeout;
 - pydantic-settings for validated environment configuration;
-- aiogram's in-memory FSM only while an administrator is uploading media.
+- aiogram's in-memory FSM while an administrator is uploading media or editing channels.
 
-Durable onboarding and media state lives in SQLite. Telegram-originated media is stored by its
-reusable Telegram `file_id`; the bot does not download and re-upload it. `MEDIA_ROOT` is created
-for future local-file use but is not required by the current delivery flow.
+Durable onboarding, channel, and media state lives in SQLite. Telegram-originated media is stored
+by its reusable Telegram `file_id`; the bot does not download and re-upload it. `MEDIA_ROOT` is
+created for future local-file use but is not required by the current delivery flow.
 
 ## Requirements
 
 - Python 3.14+ for local development
 - A Telegram bot token from [BotFather](https://t.me/BotFather)
-- One Telegram channel
+- At least one Telegram channel
 - The numeric Telegram user IDs of all administrators
 
 ## Local setup
@@ -54,7 +54,7 @@ Check an already initialized database without changing it or contacting Telegram
 ```
 
 Unlike `--check`, the health check never creates the database or schema. It fails when the
-database is missing, corrupt, or does not contain the expected `users` and `media` tables.
+database is missing, corrupt, or does not contain the expected current schema.
 
 The dispatcher removes any existing webhook and starts long polling. SIGINT and SIGTERM are
 handled by aiogram's polling runner, after which the Telegram session and database engine close.
@@ -67,14 +67,16 @@ ignored by Git.
 | Variable | Required | Description |
 | --- | --- | --- |
 | `BOT_TOKEN` | Yes | BotFather token. It is treated as a secret and is not logged. |
-| `CHANNEL_ID` | Yes | Numeric channel ID such as `-1001234567890`, or public `@username`. |
-| `CHANNEL_URL` | Yes | Telegram HTTPS URL used by the Subscribe button, including private invite links. |
+| `CHANNEL_ID` | Yes | Bootstrap channel ID such as `-1001234567890`, or public `@username`. |
+| `CHANNEL_URL` | Yes | Bootstrap channel HTTPS join URL, including private invite links. |
 | `ADMIN_IDS` | Yes | Comma-separated positive Telegram user IDs, for example `123,456`. |
 | `DATABASE_PATH` | No | SQLite path; defaults to `./data/bot.sqlite3`. |
 | `MEDIA_ROOT` | No | Reserved local media directory; defaults to `./media`. |
 
-Startup fails with field-specific errors if required values are missing or malformed. Never put a
-real token in `.env.example` or source code.
+Startup fails with field-specific errors if required values are missing or malformed. On a normal
+start, the environment channel is validated through Telegram and inserted only when the channels
+table is empty. Once a channel exists, administrator changes in SQLite are authoritative and later
+environment changes do not overwrite them. Never put a real token in `.env.example` or source code.
 
 In the production container, `DATABASE_PATH` is fixed to `/app/data/bot.sqlite3` and `MEDIA_ROOT`
 to `/app/media`. Both directories are backed by named Docker volumes.
@@ -139,8 +141,8 @@ Configure these repository variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `CHANNEL_ID` | Numeric channel ID or `@username`. |
-| `CHANNEL_URL` | Valid Telegram HTTPS link. |
+| `CHANNEL_ID` | Initial numeric channel ID or `@username`, used only to bootstrap an empty database. |
+| `CHANNEL_URL` | Initial valid Telegram HTTPS join link, used with `CHANNEL_ID`. |
 | `ADMIN_IDS` | Comma-separated positive Telegram user IDs. |
 | `VPS_PORT` | SSH port; leave unset to use `22`. |
 
@@ -176,30 +178,37 @@ initialize Git, configure a remote, or push anything externally.
 ## Telegram and channel setup
 
 1. Create the bot with BotFather and place its token in `BOT_TOKEN`.
-2. Add the bot to the target channel as an administrator.
-3. Put the channel's API identifier in `CHANNEL_ID` and its public or invite link in
+2. Add the bot to the initial channel as an administrator.
+3. Put that channel's API identifier in `CHANNEL_ID` and its public or invite link in
    `CHANNEL_URL`.
 4. Put each administrator's numeric Telegram user ID in `ADMIN_IDS`.
 5. Start the process and talk to the bot in a private chat.
 
+The first normal startup validates and stores the environment channel. Add every later channel
+through **Administration → Channels**. The bot fetches each title from Telegram and refuses a
+channel unless it is a Telegram channel and the bot is its administrator.
+
 Telegram only guarantees `getChatMember` results for other users when the bot is an administrator
-in the chat. Therefore, channel administrator access is an operational requirement, not an
-optional enhancement. The bot does not need permission to publish channel posts, but it must
-remain an administrator with enough access for reliable membership queries.
+in the chat. Therefore, administrator access in every managed channel is an operational
+requirement. The bot does not need permission to publish posts, but it must remain an
+administrator with enough access for reliable membership queries.
 
 For a private channel, use its internal `-100...` ID for `CHANNEL_ID` and a valid `https://t.me/+...`
 invite link for `CHANNEL_URL`.
 
 ## User flow
 
-1. `/start` upserts the user and sends a separate welcome message.
-2. An unverified user receives a native `request_contact` reply keyboard.
+1. A first `/start` requires the user to choose Uzbek, Russian, or English. Uzbek is the safe
+   fallback until a choice is stored.
+2. The bot sends a localized welcome. An unverified user receives a native `request_contact`
+   reply keyboard.
 3. The bot accepts the contact only when `contact.user_id` matches the sender, stores the
-   normalized phone number, and removes the reply keyboard.
-4. A separate message asks the user to join the configured channel.
-5. `Check subscription` is answered immediately and performs a live Telegram membership lookup.
-6. A failed check updates the existing prompt and keeps its buttons. A successful check edits the
-   same prompt, removes the buttons, and sends active media in `(sort_order, id)` order.
+   normalized phone number, and replaces the contact keyboard with the persistent language button.
+4. A persistent `Til / Язык / Language` button and `/language` allow switching at any time.
+5. A separate message asks the user to join every managed channel.
+6. `Check subscription` is answered immediately and performs live Telegram membership lookups.
+7. A failed or partial check updates the existing prompt and keeps its buttons. A successful check
+   edits the same prompt, removes the buttons, and sends active media in `(sort_order, id)` order.
 
 The current prompt message ID is persisted and atomically claimed, so double-clicking the same
 successful check does not send the media twice. Repeating `/start` never creates a duplicate user
@@ -215,19 +224,24 @@ Send `/admin` in a private chat from an ID listed in `ADMIN_IDS`.
 - **Manage media** shows five records per page. An administrator can inspect, enable, disable, or
   delete a record. Deletion requires confirmation and does not attempt to remove Telegram's
   underlying object.
-- `/cancel` exits an active upload prompt.
+- **Channels** shows five records per page. Administrators can add channels, replace their
+  Telegram ID or join link, and delete records with confirmation. IDs are validated live and
+  titles are fetched from Telegram. The final channel cannot be deleted.
+- `/cancel` exits an active media or channel-editing prompt.
 
 Every administrator command and callback checks the current sender ID against `ADMIN_IDS`.
 Callback data never grants authorization by itself.
 
 ## Database
 
-`users` stores the Telegram identity, optional profile data, verified phone and subscription
-timestamps, and the current subscription prompt ID. `media` stores Telegram file references,
+`users` stores the Telegram identity, selected language, optional profile data, verified phone and
+subscription timestamps, and the current subscription prompt ID. `channels` stores the Telegram
+identifier, fetched title, join URL, and timestamps. `media` stores Telegram file references,
 media type, optional filename/caption, active state, ordering, and timestamps.
 
-The schema is initialized programmatically on startup. V1 has no migration framework, so future
-schema changes must add a migration strategy before deployment to an existing database.
+The schema uses an additive, versioned SQLite migration through `PRAGMA user_version`. This release
+upgrades the original users/media schema in place and preserves existing records. A database with
+an unknown future version or an incomplete schema is rejected rather than silently repaired.
 
 ### Backup
 
@@ -261,7 +275,7 @@ Tests mock Telegram network boundaries and use temporary SQLite databases.
 
 ## Current limitations
 
-- One process, one SQLite database, and one required channel.
+- One process, one SQLite database, and at least one required managed channel.
 - Long polling only; no webhook or HTTP server.
 - No delivery history or exactly-once guarantee across manual creation of multiple prompts.
 - No media reordering UI; order is assigned when media is added.

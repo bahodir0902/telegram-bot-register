@@ -3,12 +3,15 @@ from sqlalchemy import func, select
 
 from app.db.models import User
 from app.db.session import Database
+from app.i18n import Language
 from app.services.users import (
     claim_subscription_prompt,
     contact_belongs_to_user,
     get_user,
+    get_user_language,
     normalize_phone_number,
     set_subscription_prompt,
+    set_user_language,
     upsert_user,
 )
 
@@ -82,3 +85,22 @@ async def test_subscription_prompt_can_only_be_claimed_once(database: Database) 
     assert user is not None
     assert user.subscription_prompt_message_id is None
     assert user.subscription_verified_at is not None
+
+
+async def test_user_language_defaults_and_persists(database: Database) -> None:
+    async with database.session_factory.begin() as session:
+        await upsert_user(
+            session,
+            telegram_id=77,
+            username=None,
+            first_name="User",
+            last_name=None,
+        )
+        assert await get_user_language(session, 77) == Language.UZ
+        await set_user_language(session, 77, Language.RU)
+
+    async with database.session_factory() as session:
+        user = await get_user(session, 77)
+        assert user is not None
+        assert user.language_code == Language.RU
+        assert await get_user_language(session, 77) == Language.RU

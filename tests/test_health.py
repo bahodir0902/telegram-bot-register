@@ -7,6 +7,7 @@ import pytest
 
 from app.config import Settings
 from app.db.base import Base
+from app.db.migrations import SCHEMA_VERSION
 from app.db.session import create_database
 from app.health import HealthcheckError, check_database
 from app.main import healthcheck_or_exit
@@ -14,7 +15,7 @@ from tests.conftest import TEST_TOKEN
 
 
 def test_database_session_registers_expected_tables() -> None:
-    assert {"media", "users"}.issubset(Base.metadata.tables)
+    assert {"channels", "media", "users"}.issubset(Base.metadata.tables)
 
 
 @pytest.mark.asyncio
@@ -41,7 +42,7 @@ def test_healthcheck_rejects_uninitialized_schema(tmp_path) -> None:
     with sqlite3.connect(database_path):
         pass
 
-    with pytest.raises(HealthcheckError, match="missing tables: media, users"):
+    with pytest.raises(HealthcheckError, match="schema version is 0"):
         check_database(database_path)
 
 
@@ -69,3 +70,12 @@ def test_healthcheck_failure_does_not_log_bot_token(tmp_path, caplog) -> None:
 
     assert exc_info.value.code == 1
     assert TEST_TOKEN not in caplog.text
+
+
+def test_healthcheck_rejects_future_schema(tmp_path) -> None:
+    database_path = tmp_path / "future.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(f"PRAGMA user_version={SCHEMA_VERSION + 1}")
+
+    with pytest.raises(HealthcheckError, match="expected"):
+        check_database(database_path)

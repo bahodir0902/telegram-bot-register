@@ -7,6 +7,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Index, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.i18n import Language
 
 
 def utc_now() -> datetime:
@@ -28,9 +29,34 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     first_name: Mapped[str | None] = mapped_column(String(255))
     last_name: Mapped[str | None] = mapped_column(String(255))
+    language_code: Mapped[Language | None] = mapped_column(
+        Enum(
+            Language,
+            native_enum=False,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+            length=2,
+            create_constraint=True,
+            name="language_code",
+        )
+    )
     phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     subscription_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     subscription_prompt_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class Channel(Base):
+    __tablename__ = "channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_chat_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    join_url: Mapped[str] = mapped_column(String(512), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
