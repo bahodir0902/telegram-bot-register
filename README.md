@@ -20,7 +20,7 @@ for future local-file use but is not required by the current delivery flow.
 
 ## Requirements
 
-- Python 3.13+ for local development
+- Python 3.14+ for local development
 - A Telegram bot token from [BotFather](https://t.me/BotFather)
 - One Telegram channel
 - The numeric Telegram user IDs of all administrators
@@ -30,7 +30,7 @@ for future local-file use but is not required by the current delivery flow.
 With [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv sync --dev --python 3.13
+uv sync --dev --python 3.14
 cp .env.example .env
 ```
 
@@ -105,7 +105,7 @@ pushes to `main`, and manual dispatches. Pull requests stop after `Verify` and `
 1. `Verify` scans full Git history with Gitleaks, runs Semgrep Python/security rules with metrics
    disabled, scans source/dependencies/secrets/Docker configuration with Trivy, validates the
    deployment shell script, and renders Compose with dummy values.
-2. `Test` verifies `uv.lock`, installs Python 3.13 and locked development dependencies, then runs
+2. `Test` verifies `uv.lock`, installs Python 3.14.7 and locked development dependencies, then runs
    Ruff formatting/lint checks and pytest.
 3. `Build and publish` builds only `linux/amd64`, publishes lowercase GHCR tags
    `sha-<commit>` and `latest`, and blocks deployment if the published digest has a fixed
