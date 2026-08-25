@@ -42,6 +42,8 @@ async def upsert_user(
             username=username,
             first_name=first_name,
             last_name=last_name,
+            is_reachable=True,
+            unreachable_at=None,
             created_at=now,
             updated_at=now,
         )
@@ -51,6 +53,8 @@ async def upsert_user(
                 "username": username,
                 "first_name": first_name,
                 "last_name": last_name,
+                "is_reachable": True,
+                "unreachable_at": None,
                 "updated_at": now,
             },
         )
@@ -82,6 +86,23 @@ async def verify_phone(session: AsyncSession, telegram_id: int, phone_number: st
         update(User)
         .where(User.telegram_id == telegram_id)
         .values(phone_number=phone_number, phone_verified_at=now, updated_at=now)
+    )
+
+
+async def mark_user_unreachable(session: AsyncSession, telegram_id: int) -> None:
+    now = datetime.now(UTC)
+    await session.execute(
+        update(User)
+        .where(User.telegram_id == telegram_id)
+        .values(is_reachable=False, unreachable_at=now, updated_at=now)
+    )
+
+
+async def mark_user_reachable(session: AsyncSession, telegram_id: int) -> None:
+    await session.execute(
+        update(User)
+        .where(User.telegram_id == telegram_id, User.is_reachable.is_(False))
+        .values(is_reachable=True, unreachable_at=None, updated_at=datetime.now(UTC))
     )
 
 

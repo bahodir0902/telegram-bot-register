@@ -2,7 +2,18 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class AdminUpload(StatesGroup):
-    waiting_for_media = State()
+    waiting_for_content = State()
+    waiting_for_uz = State()
+    waiting_for_ru = State()
+    waiting_for_en = State()
+
+
+class AdminBroadcast(StatesGroup):
+    waiting_for_content = State()
+    waiting_for_uz = State()
+    waiting_for_ru = State()
+    waiting_for_en = State()
+    waiting_for_confirmation = State()
 
 
 class AdminChannelAdd(StatesGroup):

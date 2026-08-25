@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.bot.callbacks import AdminCallback, ChannelCallback, MediaCallback
-from app.db.models import Channel, Media, MediaType
+from app.bot.callbacks import (
+    AdminCallback,
+    BroadcastCallback,
+    ChannelCallback,
+    MediaCallback,
+)
+from app.db.models import BroadcastStatus, Channel, Media, MediaType
 from app.i18n import Language, tr
 from app.services.channels import ChannelPage
 from app.services.media import MediaPage
@@ -14,14 +19,20 @@ def admin_menu_keyboard(language: Language) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=tr(language, "admin_add_media"),
+                    text=tr(language, "admin_add_content"),
                     callback_data=AdminCallback(action="add").pack(),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text=tr(language, "admin_manage_media"),
+                    text=tr(language, "admin_manage_content"),
                     callback_data=AdminCallback(action="manage").pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "admin_send_broadcast"),
+                    callback_data=AdminCallback(action="broadcast").pack(),
                 )
             ],
             [
@@ -49,11 +60,13 @@ def upload_cancel_keyboard(language: Language) -> InlineKeyboardMarkup:
 
 def media_label(item: Media) -> str:
     icons = {
+        MediaType.TEXT: "💬",
         MediaType.VIDEO: "🎬",
         MediaType.PHOTO: "🖼",
         MediaType.DOCUMENT: "📄",
     }
-    name = item.original_filename or f"{item.media_type.value}-{item.id}"
+    name = item.original_filename or item.text_uz or f"{item.media_type.value}-{item.id}"
+    name = name.replace("\n", " ")
     name = name if len(name) <= 40 else f"{name[:37]}..."
     status = "🟢" if item.is_active else "🔴"
     return f"{icons[item.media_type]} {name} {status}"
@@ -266,3 +279,57 @@ def channel_delete_keyboard(
             ],
         ]
     )
+
+
+def broadcast_preview_keyboard(language: Language) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "broadcast_confirm"),
+                    callback_data=BroadcastCallback(action="confirm", broadcast_id=0).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "cancel"),
+                    callback_data=BroadcastCallback(action="cancel_draft", broadcast_id=0).pack(),
+                )
+            ],
+        ]
+    )
+
+
+def broadcast_status_keyboard(
+    broadcast_id: int,
+    status: BroadcastStatus,
+    language: Language,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=tr(language, "broadcast_refresh"),
+                callback_data=BroadcastCallback(action="status", broadcast_id=broadcast_id).pack(),
+            )
+        ]
+    ]
+    if status in {BroadcastStatus.QUEUED, BroadcastStatus.RUNNING}:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "broadcast_cancel_pending"),
+                    callback_data=BroadcastCallback(
+                        action="cancel", broadcast_id=broadcast_id
+                    ).pack(),
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=tr(language, "admin_menu_button"),
+                callback_data=AdminCallback(action="menu").pack(),
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)

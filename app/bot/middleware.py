@@ -7,7 +7,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from app.i18n import DEFAULT_LANGUAGE
-from app.services.users import get_user_language
+from app.services.users import get_user, mark_user_reachable
 
 
 class UserLanguageMiddleware(BaseMiddleware):
@@ -22,6 +22,11 @@ class UserLanguageMiddleware(BaseMiddleware):
         sender = event.from_user if isinstance(event, (Message, CallbackQuery)) else None
         if sender is not None and session_factory is not None:
             async with session_factory() as session:
-                language = await get_user_language(session, sender.id)
+                user = await get_user(session, sender.id)
+            if user is not None:
+                language = user.language_code or DEFAULT_LANGUAGE
+                if isinstance(event, Message) and not user.is_reachable:
+                    async with session_factory.begin() as session:
+                        await mark_user_reachable(session, sender.id)
         data["language"] = language
         return await handler(event, data)

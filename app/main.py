@@ -34,8 +34,8 @@ def build_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.errors.register(errors.handle_update_error)
     language_middleware = UserLanguageMiddleware()
-    dispatcher.message.middleware(language_middleware)
-    dispatcher.callback_query.middleware(language_middleware)
+    dispatcher.message.outer_middleware(language_middleware)
+    dispatcher.callback_query.outer_middleware(language_middleware)
     dispatcher.include_router(language.router)
     dispatcher.include_router(admin.router)
     dispatcher.include_router(subscription.router)
@@ -72,6 +72,7 @@ async def run(*, check_only: bool = False) -> None:
 
     from app.db.migrations import SchemaMigrationError
     from app.db.session import create_database
+    from app.services.broadcasts import BroadcastWorker
     from app.services.channels import ChannelBootstrapError, bootstrap_initial_channel
 
     settings = load_settings_or_exit()
@@ -93,21 +94,27 @@ async def run(*, check_only: bool = False) -> None:
         token=settings.bot_token.get_secret_value(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    broadcast_worker: BroadcastWorker | None = None
     try:
         try:
             await bootstrap_initial_channel(bot, settings, database.session_factory)
         except ChannelBootstrapError as exc:
             logger.error("Channel bootstrap failed: %s", exc)
             raise SystemExit(2) from None
+        broadcast_worker = BroadcastWorker(bot, database.session_factory)
+        await broadcast_worker.start()
         dispatcher = build_dispatcher()
         await bot.delete_webhook(drop_pending_updates=False)
         await dispatcher.start_polling(
             bot,
             settings=settings,
             session_factory=database.session_factory,
+            broadcast_worker=broadcast_worker,
             allowed_updates=dispatcher.resolve_used_update_types(),
         )
     finally:
+        if broadcast_worker is not None:
+            await broadcast_worker.stop()
         await bot.session.close()
         await database.close()
 

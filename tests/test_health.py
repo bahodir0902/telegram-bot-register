@@ -15,7 +15,13 @@ from tests.conftest import TEST_TOKEN
 
 
 def test_database_session_registers_expected_tables() -> None:
-    assert {"channels", "media", "users"}.issubset(Base.metadata.tables)
+    assert {
+        "broadcast_recipients",
+        "broadcasts",
+        "channels",
+        "media",
+        "users",
+    }.issubset(Base.metadata.tables)
 
 
 @pytest.mark.asyncio

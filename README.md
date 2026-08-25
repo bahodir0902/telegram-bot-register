@@ -1,8 +1,8 @@
 # Telegram Registration Bot
 
 A small multilingual Telegram-native bot that verifies a user's own phone contact, checks
-membership in every administrator-managed channel, and delivers all active media. Administrators
-manage channels and media entirely through the bot.
+membership in every administrator-managed channel, and delivers all active content. Administrators
+manage channels, localized content, and broadcasts entirely through the bot.
 
 ## Architecture
 
@@ -12,10 +12,11 @@ The application is one asynchronous Python process using:
 - SQLAlchemy 2 async ORM with aiosqlite;
 - one SQLite database configured with WAL, foreign keys, and a busy timeout;
 - pydantic-settings for validated environment configuration;
-- aiogram's in-memory FSM while an administrator is uploading media or editing channels.
+- aiogram's in-memory FSM while an administrator is composing content or editing channels.
 
-Durable onboarding, channel, and media state lives in SQLite. Telegram-originated media is stored
-by its reusable Telegram `file_id`; the bot does not download and re-upload it. `MEDIA_ROOT` is
+Durable onboarding, channel, content, and confirmed-broadcast state lives in SQLite. A background
+worker sends one broadcast at a time and resumes pending recipients after restart. Telegram media
+is stored by reusable `file_id`; the bot does not download and re-upload it. `MEDIA_ROOT` is
 created for future local-file use but is not required by the current delivery flow.
 
 ## Requirements
@@ -208,36 +209,43 @@ invite link for `CHANNEL_URL`.
 5. A separate message asks the user to join every managed channel.
 6. `Check subscription` is answered immediately and performs live Telegram membership lookups.
 7. A failed or partial check updates the existing prompt and keeps its buttons. A successful check
-   edits the same prompt, removes the buttons, and sends active media in `(sort_order, id)` order.
+   edits the same prompt, removes the buttons, and sends active text/media content in
+   `(sort_order, id)` order using the user's language.
 
 The current prompt message ID is persisted and atomically claimed, so double-clicking the same
-successful check does not send the media twice. Repeating `/start` never creates a duplicate user
+successful check does not send the content twice. Repeating `/start` never creates a duplicate user
 and creates a fresh subscription prompt so membership can be checked again.
 
 ## Administrator flow
 
 Send `/admin` in a private chat from an ID listed in `ADMIN_IDS`.
 
-- **Add media** waits for one video, photo, or document. The reusable `file_id`, optional
-  `file_unique_id`, filename, type, and caption are stored. New items are active and receive the
-  next sort order in increments of 10.
-- **Manage media** shows five records per page. An administrator can inspect, enable, disable, or
-  delete a record. Deletion requires confirmation and does not attempt to remove Telegram's
-  underlying object.
+- **Add content** accepts one text, photo, video, or document, then collects Uzbek, Russian, and
+  English text/caption variants. New items are active and receive the next sort order in
+  increments of 10.
+- **Manage content** shows five records per page. An administrator can inspect, enable, disable,
+  or delete any text/media record. Deletion requires confirmation and does not remove Telegram's
+  underlying media object.
+- **Send broadcast** collects the same supported content and three language variants, shows a
+  preview, and asks for confirmation. Confirmation snapshots all currently reachable users.
+  Sending continues in the background, with refreshable progress and cancellation for recipients
+  not yet sent.
 - **Channels** shows five records per page. Administrators can add channels, replace their
   Telegram ID or join link, and delete records with confirmation. IDs are validated live and
   titles are fetched from Telegram. The final channel cannot be deleted.
-- `/cancel` exits an active media or channel-editing prompt.
+- `/cancel` exits an active content, broadcast, or channel-editing prompt.
 
 Every administrator command and callback checks the current sender ID against `ADMIN_IDS`.
 Callback data never grants authorization by itself.
 
 ## Database
 
-`users` stores the Telegram identity, selected language, optional profile data, verified phone and
-subscription timestamps, and the current subscription prompt ID. `channels` stores the Telegram
-identifier, fetched title, join URL, and timestamps. `media` stores Telegram file references,
-media type, optional filename/caption, active state, ordering, and timestamps.
+`users` stores the Telegram identity, selected language, profile/verification data, current
+subscription prompt ID, and whether Telegram still considers the user reachable. `channels`
+stores the Telegram identifier, fetched title, join URL, and timestamps. `media` is the ordered
+content library and stores text or Telegram file references plus three localized text/caption
+variants. `broadcasts` and `broadcast_recipients` persist confirmed jobs, immutable audience
+snapshots, retries, progress, and cancellation state.
 
 The schema uses an additive, versioned SQLite migration through `PRAGMA user_version`. This release
 upgrades the original users/media schema in place and preserves existing records. A database with
@@ -277,7 +285,9 @@ Tests mock Telegram network boundaries and use temporary SQLite databases.
 
 - One process, one SQLite database, and at least one required managed channel.
 - Long polling only; no webhook or HTTP server.
-- No delivery history or exactly-once guarantee across manual creation of multiple prompts.
-- No media reordering UI; order is assigned when media is added.
+- Telegram has no idempotency key for sends, so a process loss after Telegram accepts a broadcast
+  message but before SQLite records success can duplicate that one recipient on recovery.
+- No content reordering UI; order is assigned when content is added.
 - No local upload storage, scheduled campaigns, audience targeting, or web dashboard.
-- In-memory admin upload state is intentionally lost on restart; durable media is not.
+- Unconfirmed admin drafts are in memory and are intentionally lost on restart; confirmed
+  broadcasts and saved content are durable.

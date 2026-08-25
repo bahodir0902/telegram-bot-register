@@ -108,7 +108,7 @@ async def check_subscription(
     if not claimed:
         return
 
-    report = await deliver_active_media(bot, sender.id, session_factory)
+    report = await deliver_active_media(bot, sender.id, session_factory, language)
     if report.total == 0:
         await message.answer(tr(language, "no_active_media"))
     elif report.sent == 0:

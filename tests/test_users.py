@@ -9,6 +9,7 @@ from app.services.users import (
     contact_belongs_to_user,
     get_user,
     get_user_language,
+    mark_user_unreachable,
     normalize_phone_number,
     set_subscription_prompt,
     set_user_language,
@@ -104,3 +105,26 @@ async def test_user_language_defaults_and_persists(database: Database) -> None:
         assert user is not None
         assert user.language_code == Language.RU
         assert await get_user_language(session, 77) == Language.RU
+
+
+async def test_user_upsert_reactivates_unreachable_user(database: Database) -> None:
+    async with database.session_factory.begin() as session:
+        await upsert_user(
+            session,
+            telegram_id=88,
+            username=None,
+            first_name="Before",
+            last_name=None,
+        )
+        await mark_user_unreachable(session, 88)
+
+    async with database.session_factory.begin() as session:
+        user = await upsert_user(
+            session,
+            telegram_id=88,
+            username="returned",
+            first_name="After",
+            last_name=None,
+        )
+    assert user.is_reachable
+    assert user.unreachable_at is None

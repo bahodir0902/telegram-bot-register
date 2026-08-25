@@ -23,3 +23,8 @@ class ChannelCallback(CallbackData, prefix="channel"):
     action: str
     channel_id: int
     page: int
+
+
+class BroadcastCallback(CallbackData, prefix="broadcast"):
+    action: str
+    broadcast_id: int
