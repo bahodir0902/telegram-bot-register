@@ -34,9 +34,12 @@ def language_selector_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def language_keyboard() -> ReplyKeyboardMarkup:
+def language_keyboard(language: Language) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=LANGUAGE_BUTTON_TEXT)]],
+        keyboard=[
+            [KeyboardButton(text=LANGUAGE_BUTTON_TEXT)],
+            [KeyboardButton(text=tr(language, "show_options"))],
+        ],
         resize_keyboard=True,
         is_persistent=True,
     )

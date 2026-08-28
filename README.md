@@ -204,8 +204,11 @@ invite link for `CHANNEL_URL`.
 2. The bot sends a localized welcome. An unverified user receives a native `request_contact`
    reply keyboard.
 3. The bot accepts the contact only when `contact.user_id` matches the sender, stores the
-   normalized phone number, and replaces the contact keyboard with the persistent language button.
-4. A persistent `Til / Язык / Language` button and `/language` allow switching at any time.
+   normalized phone number, and replaces the contact keyboard with persistent language and option
+   list buttons.
+4. `Til / Язык / Language` and `/language` allow switching at any time. The localized option-list
+   button automatically rechecks all managed channels and opens the current active options without
+   requiring `/start`; a failed check restores the normal subscription gate.
 5. A separate message asks the user to join every managed channel.
 6. `Check subscription` is answered immediately and performs live Telegram membership lookups.
 7. A failed or partial check updates the existing prompt and keeps its buttons. A successful check

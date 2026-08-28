@@ -45,9 +45,9 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.message.outer_middleware(language_middleware)
     dispatcher.callback_query.outer_middleware(language_middleware)
     dispatcher.include_router(language.router)
+    dispatcher.include_router(subscription.router)
     dispatcher.include_router(admin_options.router)
     dispatcher.include_router(admin.router)
-    dispatcher.include_router(subscription.router)
     dispatcher.include_router(contact.router)
     dispatcher.include_router(start.router)
     return dispatcher

@@ -8,7 +8,7 @@ from app.bot.callbacks import UserOptionCallback
 from app.bot.handlers import subscription as handler
 from app.db.models import Channel, MediaType
 from app.db.session import Database
-from app.i18n import Language
+from app.i18n import Language, tr
 from app.services.channels import add_channel
 from app.services.options import DeliveryReport, OptionItemInput, create_option, set_option_active
 from app.services.subscription import SubscriptionResult
@@ -45,6 +45,16 @@ def make_callback(
 def option_callback(option_id: int, *, page: int = 0, chat_id: int = 42) -> CallbackQuery:
     data = UserOptionCallback(action="select", option_id=option_id, page=page).pack()
     return make_callback(data=data, chat_id=chat_id)
+
+
+def option_list_message(language: Language = Language.EN) -> Message:
+    return Message(
+        message_id=200,
+        date=datetime.now(UTC),
+        chat=Chat(id=42, type="private"),
+        from_user=User(id=42, is_bot=False, first_name="Test"),
+        text=tr(language, "show_options"),
+    )
 
 
 async def seed_user(
@@ -116,6 +126,144 @@ def patch_common(monkeypatch):
     monkeypatch.setattr(Message, "answer", answer_message)
     monkeypatch.setattr(handler, "edit_text_safely", edit)
     return events, answers, edits
+
+
+def patch_option_list_messages(monkeypatch):
+    answers: list[str] = []
+    status_message = Message(
+        message_id=201,
+        date=datetime.now(UTC),
+        chat=Chat(id=42, type="private"),
+        from_user=User(id=999, is_bot=True, first_name="Bot"),
+        text="Checking",
+    )
+
+    async def answer_message(_message, text, **_kwargs):
+        answers.append(text)
+        return status_message
+
+    monkeypatch.setattr(Message, "answer", answer_message)
+    return answers, status_message
+
+
+async def test_option_list_button_rechecks_membership_and_renders_first_page(
+    monkeypatch, database: Database
+) -> None:
+    answers, status_message = patch_option_list_messages(monkeypatch)
+    events: list[str] = []
+    await seed_user(database)
+    await seed_channel(database)
+    await seed_option(database)
+
+    async def subscribed(*_args, **_kwargs):
+        events.append("check")
+        return SubscriptionResult((), ())
+
+    async def render(message, page, language, _session_factory):
+        assert message is status_message
+        events.append(f"render:{page}:{language.value}")
+
+    monkeypatch.setattr(handler, "check_subscriptions", subscribed)
+    monkeypatch.setattr(handler, "render_option_menu", render)
+    await handler.show_option_list(
+        option_list_message(), object(), Language.EN, database.session_factory
+    )
+
+    assert answers == [tr(Language.EN, "checking_subscription")]
+    assert events == ["check", "render:0:en"]
+    async with database.session_factory() as session:
+        user = await get_user(session, 42)
+    assert user is not None and user.subscription_verified_at is not None
+
+
+async def test_option_list_button_restores_gate_when_membership_is_missing(
+    monkeypatch, database: Database
+) -> None:
+    _, status_message = patch_option_list_messages(monkeypatch)
+    restored: list[tuple[Message, str]] = []
+    await seed_user(database)
+    channel = await seed_channel(database)
+
+    async def missing(*_args, **_kwargs):
+        return SubscriptionResult((channel,), ())
+
+    async def restore(message, _user_id, _channels, _language, _factory, *, text):
+        restored.append((message, text))
+
+    monkeypatch.setattr(handler, "check_subscriptions", missing)
+    monkeypatch.setattr(handler, "restore_subscription_prompt", restore)
+    await handler.show_option_list(
+        option_list_message(), object(), Language.EN, database.session_factory
+    )
+
+    assert restored and restored[0][0] is status_message
+    assert channel.title in restored[0][1]
+
+
+async def test_option_list_button_api_failure_keeps_a_retryable_gate(
+    monkeypatch, database: Database
+) -> None:
+    patch_option_list_messages(monkeypatch)
+    restored: list[str] = []
+    await seed_user(database)
+    channel = await seed_channel(database)
+
+    async def unavailable(*_args, **_kwargs):
+        return SubscriptionResult((), (channel,))
+
+    async def restore(_message, _user_id, _channels, _language, _factory, *, text):
+        restored.append(text)
+
+    monkeypatch.setattr(handler, "check_subscriptions", unavailable)
+    monkeypatch.setattr(handler, "restore_subscription_prompt", restore)
+    await handler.show_option_list(
+        option_list_message(), object(), Language.EN, database.session_factory
+    )
+
+    assert restored == [tr(Language.EN, "subscription_check_error")]
+
+
+async def test_option_list_button_rejects_unverified_user_without_network_check(
+    monkeypatch, database: Database
+) -> None:
+    answers, _ = patch_option_list_messages(monkeypatch)
+    await seed_user(database, verified=False)
+
+    async def should_not_check(*_args, **_kwargs):
+        raise AssertionError("subscription check must not run")
+
+    monkeypatch.setattr(handler, "check_subscriptions", should_not_check)
+    await handler.show_option_list(
+        option_list_message(), object(), Language.EN, database.session_factory
+    )
+
+    assert answers == [tr(Language.EN, "option_registration_required")]
+
+
+async def test_option_list_button_handles_channel_removal_during_check(
+    monkeypatch, database: Database
+) -> None:
+    _, status_message = patch_option_list_messages(monkeypatch)
+    edits: list[str] = []
+    await seed_user(database)
+    channel = await seed_channel(database)
+
+    async def subscribed(*_args, **_kwargs):
+        async with database.session_factory.begin() as session:
+            await session.delete(await session.get(Channel, channel.id))
+        return SubscriptionResult((), ())
+
+    async def edit(message, text, **_kwargs):
+        assert message is status_message
+        edits.append(text)
+
+    monkeypatch.setattr(handler, "check_subscriptions", subscribed)
+    monkeypatch.setattr(handler, "edit_text_safely", edit)
+    await handler.show_option_list(
+        option_list_message(), object(), Language.EN, database.session_factory
+    )
+
+    assert edits == [tr(Language.EN, "subscription_no_channels")]
 
 
 async def test_successful_subscription_transitions_to_menu_once_without_auto_content(

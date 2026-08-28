@@ -76,7 +76,7 @@ async def set_language(
         return
     await message.answer(
         tr(selected, "language_changed"),
-        reply_markup=language_keyboard(),
+        reply_markup=language_keyboard(selected),
     )
 
 

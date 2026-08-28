@@ -55,7 +55,7 @@ async def receive_contact(
 
     await message.answer(
         tr(language, "phone_verified"),
-        reply_markup=language_keyboard(),
+        reply_markup=language_keyboard(language),
     )
     await send_subscription_prompt(message, sender, language, session_factory)
 

@@ -31,7 +31,9 @@ def test_representative_text_and_keyboards_render_in_every_language() -> None:
         assert keyboard.keyboard[0][0].text == tr(language, "share_phone")
         assert keyboard.keyboard[1][0].text == LANGUAGE_BUTTON_TEXT
 
-    persistent = language_keyboard()
-    assert persistent.is_persistent
-    assert persistent.keyboard[0][0].text == LANGUAGE_BUTTON_TEXT
+    for language in Language:
+        persistent = language_keyboard(language)
+        assert persistent.is_persistent
+        assert persistent.keyboard[0][0].text == LANGUAGE_BUTTON_TEXT
+        assert persistent.keyboard[1][0].text == tr(language, "show_options")
     assert len(language_selector_keyboard().inline_keyboard[0]) == 3

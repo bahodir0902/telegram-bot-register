@@ -60,7 +60,7 @@ async def continue_onboarding(
 
     await message.answer(
         tr(language, "welcome"),
-        reply_markup=language_keyboard() if user.phone_verified_at is not None else None,
+        reply_markup=language_keyboard(language) if user.phone_verified_at is not None else None,
     )
     if user.phone_verified_at is None:
         await message.answer(
