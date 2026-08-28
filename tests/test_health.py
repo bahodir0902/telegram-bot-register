@@ -19,7 +19,8 @@ def test_database_session_registers_expected_tables() -> None:
         "broadcast_recipients",
         "broadcasts",
         "channels",
-        "media",
+        "content_options",
+        "option_content_items",
         "users",
     }.issubset(Base.metadata.tables)
 

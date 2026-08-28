@@ -1,7 +1,7 @@
 [project]
 name = "telegram-registration-bot"
 version = "0.1.0"
-description = "A small Telegram-native registration and media delivery bot"
+description = "A multilingual Telegram registration and option-based content bot"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

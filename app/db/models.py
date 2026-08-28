@@ -94,11 +94,33 @@ class Channel(Base):
     )
 
 
-class Media(Base):
-    __tablename__ = "media"
+class ContentOption(Base):
+    __tablename__ = "content_options"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_file_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    name_uz: Mapped[str] = mapped_column(String(64), nullable=False)
+    name_ru: Mapped[str] = mapped_column(String(64), nullable=False)
+    name_en: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    __table_args__ = (Index("ix_content_options_active_order", "is_active", "sort_order", "id"),)
+
+
+class OptionContentItem(Base):
+    __tablename__ = "option_content_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    option_id: Mapped[int] = mapped_column(
+        ForeignKey("content_options.id", ondelete="CASCADE"), nullable=False
+    )
+    telegram_file_id: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     telegram_file_unique_id: Mapped[str | None] = mapped_column(String(255))
     media_type: Mapped[MediaType] = mapped_column(
         Enum(
@@ -110,11 +132,9 @@ class Media(Base):
         nullable=False,
     )
     original_filename: Mapped[str | None] = mapped_column(String(255))
-    caption: Mapped[str | None] = mapped_column(Text)
-    text_uz: Mapped[str | None] = mapped_column(Text)
-    text_ru: Mapped[str | None] = mapped_column(Text)
-    text_en: Mapped[str | None] = mapped_column(Text)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    text_uz: Mapped[str] = mapped_column(Text, nullable=False)
+    text_ru: Mapped[str] = mapped_column(Text, nullable=False)
+    text_en: Mapped[str] = mapped_column(Text, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
@@ -123,7 +143,7 @@ class Media(Base):
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
 
-    __table_args__ = (Index("ix_media_active_order", "is_active", "sort_order", "id"),)
+    __table_args__ = (Index("ix_option_content_items_order", "option_id", "sort_order", "id"),)
 
 
 class Broadcast(Base):

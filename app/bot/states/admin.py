@@ -1,11 +1,30 @@
 from aiogram.fsm.state import State, StatesGroup
 
 
-class AdminUpload(StatesGroup):
+class AdminOptionCreate(StatesGroup):
+    waiting_for_name_uz = State()
+    waiting_for_name_ru = State()
+    waiting_for_name_en = State()
     waiting_for_content = State()
     waiting_for_uz = State()
     waiting_for_ru = State()
     waiting_for_en = State()
+    waiting_for_more = State()
+
+
+class AdminOptionNameEdit(StatesGroup):
+    waiting_for_value = State()
+
+
+class AdminOptionItemCompose(StatesGroup):
+    waiting_for_content = State()
+    waiting_for_uz = State()
+    waiting_for_ru = State()
+    waiting_for_en = State()
+
+
+class AdminOptionItemTextEdit(StatesGroup):
+    waiting_for_value = State()
 
 
 class AdminBroadcast(StatesGroup):

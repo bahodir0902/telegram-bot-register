@@ -28,7 +28,15 @@ def build_dispatcher() -> Dispatcher:
     from aiogram import Dispatcher
     from aiogram.fsm.storage.memory import MemoryStorage
 
-    from app.bot.handlers import admin, contact, errors, language, start, subscription
+    from app.bot.handlers import (
+        admin,
+        admin_options,
+        contact,
+        errors,
+        language,
+        start,
+        subscription,
+    )
     from app.bot.middleware import UserLanguageMiddleware
 
     dispatcher = Dispatcher(storage=MemoryStorage())
@@ -37,6 +45,7 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.message.outer_middleware(language_middleware)
     dispatcher.callback_query.outer_middleware(language_middleware)
     dispatcher.include_router(language.router)
+    dispatcher.include_router(admin_options.router)
     dispatcher.include_router(admin.router)
     dispatcher.include_router(subscription.router)
     dispatcher.include_router(contact.router)

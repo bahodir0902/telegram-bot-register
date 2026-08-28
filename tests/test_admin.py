@@ -5,14 +5,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Chat, Message, User
-from sqlalchemy import select
 
 from app.bot.filters.admin import AdminFilter, is_admin_user
 from app.bot.handlers import admin as admin_handler
-from app.bot.states.admin import AdminBroadcast, AdminUpload
+from app.bot.states.admin import AdminBroadcast
 from app.config import Settings
-from app.db.models import Media, MediaType
-from app.db.session import Database
 from app.i18n import Language
 
 
@@ -44,40 +41,6 @@ def make_state() -> FSMContext:
     )
 
 
-async def test_admin_can_add_three_language_text_content(monkeypatch, database: Database) -> None:
-    answers: list[str] = []
-
-    async def answer(_message, text, **_kwargs) -> None:
-        answers.append(text)
-
-    monkeypatch.setattr(Message, "answer", answer)
-    state = make_state()
-    await state.update_data(purpose="library")
-    await state.set_state(AdminUpload.waiting_for_content)
-
-    await admin_handler.receive_admin_content(make_admin_message("O‘zbekcha"), state, Language.EN)
-    await admin_handler.receive_ru_content(make_admin_message("Русский"), state, Language.EN)
-    await admin_handler.receive_en_content(
-        make_admin_message("English"),
-        object(),
-        state,
-        Language.EN,
-        database.session_factory,
-    )
-
-    async with database.session_factory() as session:
-        item = await session.scalar(select(Media))
-    assert item is not None
-    assert item.media_type == MediaType.TEXT
-    assert (item.text_uz, item.text_ru, item.text_en) == (
-        "O‘zbekcha",
-        "Русский",
-        "English",
-    )
-    assert await state.get_state() is None
-    assert answers
-
-
 async def test_broadcast_composition_previews_current_admin_language(monkeypatch) -> None:
     async def answer(*_args, **_kwargs) -> None:
         pass
@@ -103,7 +66,7 @@ async def test_broadcast_composition_previews_current_admin_language(monkeypatch
     assert bot.send_message.await_args.args[:2] == (10, "English")
 
 
-async def test_admin_oversized_text_is_rejected_without_losing_state(monkeypatch) -> None:
+async def test_broadcast_oversized_text_is_rejected_without_losing_state(monkeypatch) -> None:
     answers: list[str] = []
 
     async def answer(_message, text, **_kwargs) -> None:
@@ -111,9 +74,9 @@ async def test_admin_oversized_text_is_rejected_without_losing_state(monkeypatch
 
     monkeypatch.setattr(Message, "answer", answer)
     state = make_state()
-    await state.set_state(AdminUpload.waiting_for_content)
+    await state.set_state(AdminBroadcast.waiting_for_content)
 
     await admin_handler.receive_admin_content(make_admin_message("x" * 4097), state, Language.EN)
 
-    assert await state.get_state() == AdminUpload.waiting_for_content.state
+    assert await state.get_state() == AdminBroadcast.waiting_for_content.state
     assert any("4096" in text for text in answers)

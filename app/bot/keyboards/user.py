@@ -7,9 +7,10 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from app.bot.callbacks import LanguageCallback, SubscriptionCallback
+from app.bot.callbacks import LanguageCallback, SubscriptionCallback, UserOptionCallback
 from app.db.models import Channel
 from app.i18n import LANGUAGE_BUTTON_TEXT, Language, tr
+from app.services.options import OptionPage, localized_option_name
 
 
 def language_selector_keyboard() -> InlineKeyboardMarkup:
@@ -73,4 +74,40 @@ def subscription_keyboard(
             )
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def options_keyboard(result: OptionPage, language: Language) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=localized_option_name(option, language),
+                callback_data=UserOptionCallback(
+                    action="select", option_id=option.id, page=result.page
+                ).pack(),
+            )
+        ]
+        for option in result.items
+    ]
+    navigation: list[InlineKeyboardButton] = []
+    if result.page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                text="⬅️",
+                callback_data=UserOptionCallback(
+                    action="page", option_id=0, page=result.page - 1
+                ).pack(),
+            )
+        )
+    if result.page < result.pages - 1:
+        navigation.append(
+            InlineKeyboardButton(
+                text="➡️",
+                callback_data=UserOptionCallback(
+                    action="page", option_id=0, page=result.page + 1
+                ).pack(),
+            )
+        )
+    if navigation:
+        rows.append(navigation)
     return InlineKeyboardMarkup(inline_keyboard=rows)

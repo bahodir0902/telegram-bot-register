@@ -5,9 +5,18 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.db.base import Base
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 LEGACY_TABLES = frozenset({"media", "users"})
-EXPECTED_TABLES = frozenset({"broadcast_recipients", "broadcasts", "channels", "media", "users"})
+EXPECTED_TABLES = frozenset(
+    {
+        "broadcast_recipients",
+        "broadcasts",
+        "channels",
+        "content_options",
+        "option_content_items",
+        "users",
+    }
+)
 EXPECTED_COLUMNS = {
     "users": frozenset(
         {
@@ -30,18 +39,29 @@ EXPECTED_COLUMNS = {
     "channels": frozenset(
         {"id", "telegram_chat_id", "title", "join_url", "created_at", "updated_at"}
     ),
-    "media": frozenset(
+    "content_options": frozenset(
         {
             "id",
+            "name_uz",
+            "name_ru",
+            "name_en",
+            "is_active",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    "option_content_items": frozenset(
+        {
+            "id",
+            "option_id",
             "telegram_file_id",
             "telegram_file_unique_id",
             "media_type",
             "original_filename",
-            "caption",
             "text_uz",
             "text_ru",
             "text_en",
-            "is_active",
             "sort_order",
             "created_at",
             "updated_at",
@@ -84,11 +104,36 @@ EXPECTED_COLUMNS = {
     ),
 }
 
-V1_EXPECTED_COLUMNS = {
-    "users": EXPECTED_COLUMNS["users"] - {"is_reachable", "unreachable_at"},
+V2_EXPECTED_COLUMNS = {
+    "users": EXPECTED_COLUMNS["users"],
     "channels": EXPECTED_COLUMNS["channels"],
-    "media": EXPECTED_COLUMNS["media"] - {"text_uz", "text_ru", "text_en"},
+    "media": frozenset(
+        {
+            "id",
+            "telegram_file_id",
+            "telegram_file_unique_id",
+            "media_type",
+            "original_filename",
+            "caption",
+            "text_uz",
+            "text_ru",
+            "text_en",
+            "is_active",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    "broadcasts": EXPECTED_COLUMNS["broadcasts"],
+    "broadcast_recipients": EXPECTED_COLUMNS["broadcast_recipients"],
 }
+
+V1_EXPECTED_COLUMNS = {
+    "users": V2_EXPECTED_COLUMNS["users"] - {"is_reachable", "unreachable_at"},
+    "channels": V2_EXPECTED_COLUMNS["channels"],
+    "media": V2_EXPECTED_COLUMNS["media"] - {"text_uz", "text_ru", "text_en"},
+}
+KNOWN_TABLES = frozenset(EXPECTED_COLUMNS) | frozenset(V2_EXPECTED_COLUMNS)
 
 
 class SchemaMigrationError(RuntimeError):
@@ -149,7 +194,7 @@ async def migrate_schema(connection: AsyncConnection) -> None:
         )
 
     tables = await _table_names(connection)
-    app_tables = tables & EXPECTED_TABLES
+    app_tables = tables & KNOWN_TABLES
     if not app_tables:
         await connection.run_sync(Base.metadata.create_all)
         await connection.exec_driver_sql(f"PRAGMA user_version={SCHEMA_VERSION}")
@@ -206,6 +251,51 @@ async def migrate_schema(connection: AsyncConnection) -> None:
                 sync_connection, checkfirst=True
             )
         )
+        await connection.exec_driver_sql("PRAGMA user_version=2")
+        version = 2
+
+    if version == 2:
+        await _validate_columns(connection, V2_EXPECTED_COLUMNS)
+        await connection.run_sync(
+            lambda sync_connection: Base.metadata.tables["content_options"].create(
+                sync_connection, checkfirst=True
+            )
+        )
+        await connection.run_sync(
+            lambda sync_connection: Base.metadata.tables["option_content_items"].create(
+                sync_connection, checkfirst=True
+            )
+        )
+        legacy_count = int(
+            (await connection.exec_driver_sql("SELECT COUNT(*) FROM media")).scalar_one()
+        )
+        if legacy_count:
+            insert_result = await connection.exec_driver_sql(
+                "INSERT INTO content_options ("
+                "name_uz, name_ru, name_en, is_active, sort_order, created_at, updated_at"
+                ") VALUES ("
+                "'Import qilingan kontent', 'Импортированный контент', "
+                "'Imported content', 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                ")"
+            )
+            imported_option_id = int(insert_result.lastrowid)
+            await connection.exec_driver_sql(
+                "INSERT INTO option_content_items ("
+                "option_id, telegram_file_id, telegram_file_unique_id, media_type, "
+                "original_filename, text_uz, text_ru, text_en, sort_order, "
+                "created_at, updated_at"
+                ") SELECT ?, telegram_file_id, telegram_file_unique_id, media_type, "
+                "original_filename, "
+                "COALESCE(NULLIF(text_uz, ''), NULLIF(caption, ''), "
+                "'Import qilingan kontent'), "
+                "COALESCE(NULLIF(text_ru, ''), NULLIF(caption, ''), "
+                "'Импортированный контент'), "
+                "COALESCE(NULLIF(text_en, ''), NULLIF(caption, ''), "
+                "'Imported content'), "
+                "sort_order, created_at, updated_at FROM media ORDER BY sort_order, id",
+                (imported_option_id,),
+            )
+        await connection.exec_driver_sql("DROP TABLE media")
         await connection.exec_driver_sql(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     await _validate_current_schema(connection)

@@ -14,8 +14,8 @@ from app.bot.callbacks import (
     AdminCallback,
     BroadcastCallback,
     ChannelCallback,
-    MediaCallback,
 )
+from app.bot.content_input import content_validation_text, extract_content
 from app.bot.filters.admin import AdminFilter, is_admin_user
 from app.bot.keyboards.admin import (
     admin_menu_keyboard,
@@ -24,9 +24,6 @@ from app.bot.keyboards.admin import (
     channel_delete_keyboard,
     channel_detail_keyboard,
     channel_list_keyboard,
-    media_delete_keyboard,
-    media_detail_keyboard,
-    media_list_keyboard,
     upload_cancel_keyboard,
 )
 from app.bot.messages import answer_callback_safely, edit_text_safely
@@ -34,10 +31,9 @@ from app.bot.states.admin import (
     AdminBroadcast,
     AdminChannelAdd,
     AdminChannelEdit,
-    AdminUpload,
 )
 from app.config import Settings
-from app.db.models import Channel, Media, MediaType
+from app.db.models import Channel, MediaType
 from app.db.session import AsyncSessionFactory
 from app.i18n import Language, tr
 from app.services.broadcasts import (
@@ -61,42 +57,10 @@ from app.services.channels import (
     update_channel_url,
     validate_telegram_channel,
 )
-from app.services.media import (
-    CAPTION_LIMIT,
-    TEXT_LIMIT,
-    add_media,
-    delete_media,
-    get_media,
-    list_media,
-    send_content,
-    set_media_active,
-    validate_content_text,
-)
+from app.services.content import send_content, validate_content_text
 from app.validation import validate_channel_url
 
 router = Router(name="admin")
-
-
-def media_title(item: Media) -> str:
-    name = item.original_filename or item.text_uz or f"{item.media_type.value}-{item.id}"
-    name = name.replace("\n", " ")
-    if len(name) > 80:
-        name = f"{name[:77]}..."
-    return escape(name)
-
-
-def media_type_text(item: Media, language: Language) -> str:
-    return tr(language, f"media_type_{item.media_type.value}")
-
-
-def media_detail_text(item: Media, language: Language) -> str:
-    status = tr(language, "active" if item.is_active else "inactive")
-    return (
-        f"<b>{media_title(item)}</b>\n\n"
-        f"{tr(language, 'media_type', value=media_type_text(item, language))}\n"
-        f"{tr(language, 'media_status', value=status)}\n"
-        f"{tr(language, 'media_order', order=item.sort_order)}"
-    )
 
 
 def channel_detail_text(channel: Channel, language: Language) -> str:
@@ -117,64 +81,6 @@ def channel_validation_text(error: ChannelValidationError, language: Language) -
         ChannelValidationKind.BOT_NOT_ADMIN: "channel_bot_not_admin",
     }
     return tr(language, keys[error.kind])
-
-
-def content_validation_text(
-    value: str | None, media_type: MediaType, language: Language
-) -> str | None:
-    try:
-        validate_content_text(value, media_type)
-    except ValueError:
-        if value is None or not value.strip():
-            return tr(language, "content_empty")
-        limit = TEXT_LIMIT if media_type == MediaType.TEXT else CAPTION_LIMIT
-        return tr(language, "content_too_long", limit=limit)
-    return None
-
-
-def extract_content(message: Message) -> tuple[dict[str, str | None], str | None] | None:
-    if message.text is not None:
-        return (
-            {
-                "media_type": MediaType.TEXT.value,
-                "telegram_file_id": "",
-                "telegram_file_unique_id": None,
-                "original_filename": None,
-            },
-            message.text,
-        )
-    if message.video is not None:
-        return (
-            {
-                "media_type": MediaType.VIDEO.value,
-                "telegram_file_id": message.video.file_id,
-                "telegram_file_unique_id": message.video.file_unique_id,
-                "original_filename": (message.video.file_name or "")[:255] or None,
-            },
-            message.caption,
-        )
-    if message.photo:
-        photo = message.photo[-1]
-        return (
-            {
-                "media_type": MediaType.PHOTO.value,
-                "telegram_file_id": photo.file_id,
-                "telegram_file_unique_id": photo.file_unique_id,
-                "original_filename": None,
-            },
-            message.caption,
-        )
-    if message.document is not None:
-        return (
-            {
-                "media_type": MediaType.DOCUMENT.value,
-                "telegram_file_id": message.document.file_id,
-                "telegram_file_unique_id": message.document.file_unique_id,
-                "original_filename": (message.document.file_name or "")[:255] or None,
-            },
-            message.caption,
-        )
-    return None
 
 
 def broadcast_progress_text(progress: BroadcastProgress, language: Language) -> str:
@@ -207,50 +113,6 @@ async def render_broadcast_progress(
         reply_markup=broadcast_status_keyboard(
             progress.broadcast.id, progress.broadcast.status, language
         ),
-    )
-    return True
-
-
-async def render_media_page(
-    message: Message,
-    page: int,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    async with session_factory() as session:
-        result = await list_media(session, page=page)
-    text = tr(
-        language,
-        "media_manage_title",
-        total=result.total,
-        page=result.page + 1,
-        pages=result.pages,
-    )
-    if not result.items:
-        text += f"\n\n{tr(language, 'media_empty')}"
-    await edit_text_safely(
-        message,
-        text,
-        reply_markup=media_list_keyboard(result, language),
-    )
-
-
-async def render_media_detail(
-    message: Message,
-    media_id: int,
-    page: int,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> bool:
-    async with session_factory() as session:
-        item = await get_media(session, media_id)
-    if item is None:
-        await render_media_page(message, page, language, session_factory)
-        return False
-    await edit_text_safely(
-        message,
-        media_detail_text(item, language),
-        reply_markup=media_detail_keyboard(item, page, language),
     )
     return True
 
@@ -333,22 +195,6 @@ async def return_to_admin_menu(
         )
 
 
-@router.callback_query(AdminCallback.filter(F.action == "add"), AdminFilter())
-async def begin_content_upload(
-    callback: CallbackQuery, state: FSMContext, language: Language
-) -> None:
-    await answer_callback_safely(callback)
-    await state.clear()
-    await state.update_data(purpose="library")
-    await state.set_state(AdminUpload.waiting_for_content)
-    if isinstance(callback.message, Message):
-        await edit_text_safely(
-            callback.message,
-            tr(language, "admin_content_prompt"),
-            reply_markup=upload_cancel_keyboard(language),
-        )
-
-
 @router.callback_query(AdminCallback.filter(F.action == "broadcast"), AdminFilter())
 async def begin_broadcast(callback: CallbackQuery, state: FSMContext, language: Language) -> None:
     await answer_callback_safely(callback)
@@ -363,12 +209,6 @@ async def begin_broadcast(callback: CallbackQuery, state: FSMContext, language: 
         )
 
 
-@router.message(
-    AdminUpload.waiting_for_content,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    F.video | F.photo | F.document | (F.text & ~F.text.startswith("/")),
-)
 @router.message(
     AdminBroadcast.waiting_for_content,
     F.chat.type == ChatType.PRIVATE,
@@ -395,29 +235,16 @@ async def receive_admin_content(
         return
 
     await state.update_data(**payload)
-    current_state = await state.get_state()
-    is_broadcast = current_state == AdminBroadcast.waiting_for_content.state
     if initial_uz is None:
-        await state.set_state(
-            AdminBroadcast.waiting_for_uz if is_broadcast else AdminUpload.waiting_for_uz
-        )
+        await state.set_state(AdminBroadcast.waiting_for_uz)
         prompt_key = "content_uz_prompt"
     else:
         await state.update_data(text_uz=initial_uz)
-        await state.set_state(
-            AdminBroadcast.waiting_for_ru if is_broadcast else AdminUpload.waiting_for_ru
-        )
+        await state.set_state(AdminBroadcast.waiting_for_ru)
         prompt_key = "content_ru_prompt"
     await message.answer(tr(language, prompt_key), reply_markup=upload_cancel_keyboard(language))
 
 
-@router.message(
-    AdminUpload.waiting_for_uz,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    F.text,
-    ~F.text.startswith("/"),
-)
 @router.message(
     AdminBroadcast.waiting_for_uz,
     F.chat.type == ChatType.PRIVATE,
@@ -433,25 +260,13 @@ async def receive_uz_content(message: Message, state: FSMContext, language: Lang
         await message.answer(error_text)
         return
     await state.update_data(text_uz=message.text)
-    current_state = await state.get_state()
-    await state.set_state(
-        AdminBroadcast.waiting_for_ru
-        if current_state == AdminBroadcast.waiting_for_uz.state
-        else AdminUpload.waiting_for_ru
-    )
+    await state.set_state(AdminBroadcast.waiting_for_ru)
     await message.answer(
         tr(language, "content_ru_prompt"),
         reply_markup=upload_cancel_keyboard(language),
     )
 
 
-@router.message(
-    AdminUpload.waiting_for_ru,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    F.text,
-    ~F.text.startswith("/"),
-)
 @router.message(
     AdminBroadcast.waiting_for_ru,
     F.chat.type == ChatType.PRIVATE,
@@ -467,25 +282,13 @@ async def receive_ru_content(message: Message, state: FSMContext, language: Lang
         await message.answer(error_text)
         return
     await state.update_data(text_ru=message.text)
-    current_state = await state.get_state()
-    await state.set_state(
-        AdminBroadcast.waiting_for_en
-        if current_state == AdminBroadcast.waiting_for_ru.state
-        else AdminUpload.waiting_for_en
-    )
+    await state.set_state(AdminBroadcast.waiting_for_en)
     await message.answer(
         tr(language, "content_en_prompt"),
         reply_markup=upload_cancel_keyboard(language),
     )
 
 
-@router.message(
-    AdminUpload.waiting_for_en,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    F.text,
-    ~F.text.startswith("/"),
-)
 @router.message(
     AdminBroadcast.waiting_for_en,
     F.chat.type == ChatType.PRIVATE,
@@ -508,33 +311,6 @@ async def receive_en_content(
         return
     await state.update_data(text_en=message.text)
     data["text_en"] = message.text
-    current_state = await state.get_state()
-
-    if current_state == AdminUpload.waiting_for_en.state:
-        async with session_factory.begin() as session:
-            item = await add_media(
-                session,
-                telegram_file_id=str(data.get("telegram_file_id") or ""),
-                telegram_file_unique_id=data.get("telegram_file_unique_id"),
-                media_type=media_type,
-                original_filename=data.get("original_filename"),
-                caption=str(data["text_uz"]),
-                text_uz=str(data["text_uz"]),
-                text_ru=str(data["text_ru"]),
-                text_en=message.text,
-            )
-        await state.clear()
-        await message.answer(
-            tr(
-                language,
-                "content_added",
-                name=media_title(item),
-                order=item.sort_order,
-            ),
-            reply_markup=admin_menu_keyboard(language),
-        )
-        return
-
     preview_text = {
         Language.UZ: str(data["text_uz"]),
         Language.RU: str(data["text_ru"]),
@@ -561,31 +337,7 @@ async def receive_en_content(
 
 
 @router.message(
-    AdminUpload.waiting_for_content,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    ~F.text.startswith("/"),
-)
-@router.message(
     AdminBroadcast.waiting_for_content,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    ~F.text.startswith("/"),
-)
-@router.message(
-    AdminUpload.waiting_for_uz,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    ~F.text.startswith("/"),
-)
-@router.message(
-    AdminUpload.waiting_for_ru,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    ~F.text.startswith("/"),
-)
-@router.message(
-    AdminUpload.waiting_for_en,
     F.chat.type == ChatType.PRIVATE,
     AdminFilter(),
     ~F.text.startswith("/"),
@@ -755,127 +507,6 @@ async def cancel_pending_broadcast(
             language,
             session_factory,
         )
-
-
-@router.callback_query(AdminCallback.filter(F.action == "manage"), AdminFilter())
-async def manage_media(
-    callback: CallbackQuery,
-    state: FSMContext,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    await answer_callback_safely(callback)
-    await state.clear()
-    if isinstance(callback.message, Message):
-        await render_media_page(callback.message, 0, language, session_factory)
-
-
-@router.callback_query(MediaCallback.filter(F.action == "page"), AdminFilter())
-async def change_media_page(
-    callback: CallbackQuery,
-    callback_data: MediaCallback,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    await answer_callback_safely(callback)
-    if isinstance(callback.message, Message):
-        await render_media_page(callback.message, callback_data.page, language, session_factory)
-
-
-@router.callback_query(MediaCallback.filter(F.action == "view"), AdminFilter())
-async def view_media(
-    callback: CallbackQuery,
-    callback_data: MediaCallback,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    if not isinstance(callback.message, Message):
-        await answer_callback_safely(callback)
-        return
-    found = await render_media_detail(
-        callback.message,
-        callback_data.media_id,
-        callback_data.page,
-        language,
-        session_factory,
-    )
-    await answer_callback_safely(
-        callback,
-        None if found else tr(language, "media_missing"),
-        show_alert=not found,
-    )
-
-
-@router.callback_query(MediaCallback.filter(F.action.in_({"enable", "disable"})), AdminFilter())
-async def toggle_media(
-    callback: CallbackQuery,
-    callback_data: MediaCallback,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    active = callback_data.action == "enable"
-    async with session_factory.begin() as session:
-        changed = await set_media_active(session, callback_data.media_id, active)
-
-    if isinstance(callback.message, Message):
-        if changed:
-            await render_media_detail(
-                callback.message,
-                callback_data.media_id,
-                callback_data.page,
-                language,
-                session_factory,
-            )
-        else:
-            await render_media_page(callback.message, callback_data.page, language, session_factory)
-    await answer_callback_safely(
-        callback,
-        tr(language, "media_enabled" if active else "media_disabled")
-        if changed
-        else tr(language, "media_missing"),
-        show_alert=not changed,
-    )
-
-
-@router.callback_query(MediaCallback.filter(F.action == "delete_request"), AdminFilter())
-async def request_media_deletion(
-    callback: CallbackQuery,
-    callback_data: MediaCallback,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    async with session_factory() as session:
-        item = await get_media(session, callback_data.media_id)
-    if item is None:
-        if isinstance(callback.message, Message):
-            await render_media_page(callback.message, callback_data.page, language, session_factory)
-        await answer_callback_safely(callback, tr(language, "media_missing"), show_alert=True)
-        return
-    await answer_callback_safely(callback)
-    if isinstance(callback.message, Message):
-        await edit_text_safely(
-            callback.message,
-            tr(language, "media_delete_prompt", name=media_title(item)),
-            reply_markup=media_delete_keyboard(item, callback_data.page, language),
-        )
-
-
-@router.callback_query(MediaCallback.filter(F.action == "delete_confirm"), AdminFilter())
-async def confirm_media_deletion(
-    callback: CallbackQuery,
-    callback_data: MediaCallback,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    async with session_factory.begin() as session:
-        deleted = await delete_media(session, callback_data.media_id)
-    if isinstance(callback.message, Message):
-        await render_media_page(callback.message, callback_data.page, language, session_factory)
-    await answer_callback_safely(
-        callback,
-        tr(language, "media_deleted" if deleted else "media_already_deleted"),
-        show_alert=not deleted,
-    )
 
 
 @router.callback_query(AdminCallback.filter(F.action == "channels"), AdminFilter())
@@ -1174,7 +805,6 @@ async def confirm_channel_deletion(
 
 
 @router.callback_query(AdminCallback.filter())
-@router.callback_query(MediaCallback.filter())
 @router.callback_query(ChannelCallback.filter())
 @router.callback_query(BroadcastCallback.filter())
 async def reject_admin_callback(
@@ -1190,10 +820,7 @@ async def reject_admin_callback(
 
 
 @router.callback_query(
-    F.data.startswith("admin:")
-    | F.data.startswith("media:")
-    | F.data.startswith("channel:")
-    | F.data.startswith("broadcast:")
+    F.data.startswith("admin:") | F.data.startswith("channel:") | F.data.startswith("broadcast:")
 )
 async def reject_malformed_admin_callback(
     callback: CallbackQuery, settings: Settings, language: Language

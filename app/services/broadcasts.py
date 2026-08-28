@@ -30,7 +30,7 @@ from app.db.models import (
 )
 from app.db.session import AsyncSessionFactory
 from app.i18n import DEFAULT_LANGUAGE, Language
-from app.services.media import localized_content_text, send_content
+from app.services.content import localized_content_text, send_content
 from app.services.users import mark_user_unreachable
 
 logger = logging.getLogger(__name__)

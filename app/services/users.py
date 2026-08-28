@@ -114,6 +114,16 @@ async def set_subscription_prompt(session: AsyncSession, telegram_id: int, messa
     )
 
 
+async def mark_subscription_verified(session: AsyncSession, telegram_id: int) -> bool:
+    now = datetime.now(UTC)
+    result = await session.execute(
+        update(User)
+        .where(User.telegram_id == telegram_id)
+        .values(subscription_verified_at=now, updated_at=now)
+    )
+    return result.rowcount == 1
+
+
 async def claim_subscription_prompt(
     session: AsyncSession, telegram_id: int, message_id: int
 ) -> bool:

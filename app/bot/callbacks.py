@@ -13,10 +13,24 @@ class AdminCallback(CallbackData, prefix="admin"):
     action: str
 
 
-class MediaCallback(CallbackData, prefix="media"):
+class UserOptionCallback(CallbackData, prefix="choice"):
     action: str
-    media_id: int
+    option_id: int
     page: int
+
+
+class AdminOptionCallback(CallbackData, prefix="option"):
+    action: str
+    option_id: int
+    page: int
+
+
+class OptionItemCallback(CallbackData, prefix="item"):
+    action: str
+    item_id: int
+    option_id: int
+    page: int
+    option_page: int
 
 
 class ChannelCallback(CallbackData, prefix="channel"):

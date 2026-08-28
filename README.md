@@ -1,8 +1,9 @@
 # Telegram Registration Bot
 
 A small multilingual Telegram-native bot that verifies a user's own phone contact, checks
-membership in every administrator-managed channel, and delivers all active content. Administrators
-manage channels, localized content, and broadcasts entirely through the bot.
+membership in every administrator-managed channel, and presents administrator-defined options.
+Each option delivers its own localized text/media content. Administrators manage options,
+channels, and broadcasts entirely through the bot.
 
 ## Architecture
 
@@ -14,10 +15,12 @@ The application is one asynchronous Python process using:
 - pydantic-settings for validated environment configuration;
 - aiogram's in-memory FSM while an administrator is composing content or editing channels.
 
-Durable onboarding, channel, content, and confirmed-broadcast state lives in SQLite. A background
-worker sends one broadcast at a time and resumes pending recipients after restart. Telegram media
-is stored by reusable `file_id`; the bot does not download and re-upload it. `MEDIA_ROOT` is
-created for future local-file use but is not required by the current delivery flow.
+Durable onboarding, channel, option/content, and confirmed-broadcast state lives in SQLite. Each
+option has Uzbek, Russian, and English button names and one or more ordered content items with
+localized text/captions. A background worker sends one broadcast at a time and resumes pending
+recipients after restart. Telegram media is stored by reusable `file_id`; the bot does not
+download and re-upload it. `MEDIA_ROOT` is created for future local-file use but is not required
+by the current delivery flow.
 
 ## Requirements
 
@@ -173,9 +176,6 @@ After the first successful publication:
    required by the package cleanup job.
 3. Confirm the production environment and branch protection are configured as described above.
 
-The workflow files are ready for a future GitHub repository, but this implementation does not
-initialize Git, configure a remote, or push anything externally.
-
 ## Telegram and channel setup
 
 1. Create the bot with BotFather and place its token in `BOT_TOKEN`.
@@ -209,23 +209,29 @@ invite link for `CHANNEL_URL`.
 5. A separate message asks the user to join every managed channel.
 6. `Check subscription` is answered immediately and performs live Telegram membership lookups.
 7. A failed or partial check updates the existing prompt and keeps its buttons. A successful check
-   edits the same prompt, removes the buttons, and sends active text/media content in
-   `(sort_order, id)` order using the user's language.
+   replaces the same prompt with up to eight active option buttons per page. It does not
+   automatically send content.
+8. Pressing an option performs a fresh all-channel membership check. If membership still passes,
+   the bot sends that option's content in `(sort_order, id)` order using the user's selected
+   language. A missing subscription restores the channel gate; a changed channel list requires a
+   fresh check.
 
 The current prompt message ID is persisted and atomically claimed, so double-clicking the same
-successful check does not send the content twice. Repeating `/start` never creates a duplicate user
-and creates a fresh subscription prompt so membership can be checked again.
+successful check does not render duplicate menus. Repeating `/start` never creates a duplicate
+user and creates a fresh subscription prompt so membership can be checked again.
 
 ## Administrator flow
 
 Send `/admin` in a private chat from an ID listed in `ADMIN_IDS`.
 
-- **Add content** accepts one text, photo, video, or document, then collects Uzbek, Russian, and
-  English text/caption variants. New items are active and receive the next sort order in
-  increments of 10.
-- **Manage content** shows five records per page. An administrator can inspect, enable, disable,
-  or delete any text/media record. Deletion requires confirmation and does not remove Telegram's
-  underlying media object.
+- **Add option** collects the button name in Uzbek, Russian, and English, then accepts one or more
+  text, photo, video, or document items. Each item has Uzbek, Russian, and English text/caption
+  variants. The option is saved only after at least one complete item exists.
+- **Manage options** shows five options per page. An administrator can inspect, reorder, enable,
+  disable, rename in any language, or delete an option. Each option's content list is separately
+  paginated and supports adding, replacing, reordering, editing all three localized texts, and
+  confirmed deletion. Deleting the final item automatically disables its option; an empty option
+  cannot be enabled.
 - **Send broadcast** collects the same supported content and three language variants, shows a
   preview, and asks for confirmation. Confirmation snapshots all currently reachable users.
   Sending continues in the background, with refreshable progress and cancellation for recipients
@@ -233,7 +239,7 @@ Send `/admin` in a private chat from an ID listed in `ADMIN_IDS`.
 - **Channels** shows five records per page. Administrators can add channels, replace their
   Telegram ID or join link, and delete records with confirmation. IDs are validated live and
   titles are fetched from Telegram. The final channel cannot be deleted.
-- `/cancel` exits an active content, broadcast, or channel-editing prompt.
+- `/cancel` exits an active option, broadcast, or channel-editing prompt.
 
 Every administrator command and callback checks the current sender ID against `ADMIN_IDS`.
 Callback data never grants authorization by itself.
@@ -242,14 +248,17 @@ Callback data never grants authorization by itself.
 
 `users` stores the Telegram identity, selected language, profile/verification data, current
 subscription prompt ID, and whether Telegram still considers the user reachable. `channels`
-stores the Telegram identifier, fetched title, join URL, and timestamps. `media` is the ordered
-content library and stores text or Telegram file references plus three localized text/caption
-variants. `broadcasts` and `broadcast_recipients` persist confirmed jobs, immutable audience
-snapshots, retries, progress, and cancellation state.
+stores the Telegram identifier, fetched title, join URL, and timestamps. `content_options` stores
+localized button names, active state, and ordering. `option_content_items` stores the option-owned
+text or Telegram file references, three localized text/caption variants, and per-option ordering.
+`broadcasts` and `broadcast_recipients` persist confirmed jobs, immutable audience snapshots,
+retries, progress, and cancellation state.
 
-The schema uses an additive, versioned SQLite migration through `PRAGMA user_version`. This release
-upgrades the original users/media schema in place and preserves existing records. A database with
-an unknown future version or an incomplete schema is rejected rather than silently repaired.
+The schema uses versioned SQLite migrations through `PRAGMA user_version`. This release
+upgrades the original users/media schema in place. Existing global content is preserved inside one
+disabled **Imported content** option so an administrator can rename, review, and explicitly enable
+it. A database with an unknown future version or an incomplete schema is rejected rather than
+silently repaired.
 
 ### Backup
 
