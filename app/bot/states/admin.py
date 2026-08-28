@@ -9,7 +9,6 @@ class AdminOptionCreate(StatesGroup):
     waiting_for_uz = State()
     waiting_for_ru = State()
     waiting_for_en = State()
-    waiting_for_more = State()
 
 
 class AdminOptionNameEdit(StatesGroup):

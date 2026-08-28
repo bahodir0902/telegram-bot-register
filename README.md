@@ -224,9 +224,11 @@ user and creates a fresh subscription prompt so membership can be checked again.
 
 Send `/admin` in a private chat from an ID listed in `ADMIN_IDS`.
 
-- **Add option** collects the button name in Uzbek, Russian, and English, then accepts one or more
-  text, photo, video, or document items. Each item has Uzbek, Russian, and English text/caption
-  variants. The option is saved only after at least one complete item exists.
+- **Add option** collects the button name in Uzbek, Russian, and English, then accepts text, one
+  media file, or a Telegram media album. After the English text/caption is entered, the option is
+  saved immediately—there is no second confirmation button. Every album member becomes an ordered
+  content item using the collected three-language caption. Add further content later through the
+  saved option's content manager.
 - **Manage options** shows five options per page. An administrator can inspect, reorder, enable,
   disable, rename in any language, or delete an option. Each option's content list is separately
   paginated and supports adding, replacing, reordering, editing all three localized texts, and
@@ -296,7 +298,6 @@ Tests mock Telegram network boundaries and use temporary SQLite databases.
 - Long polling only; no webhook or HTTP server.
 - Telegram has no idempotency key for sends, so a process loss after Telegram accepts a broadcast
   message but before SQLite records success can duplicate that one recipient on recovery.
-- No content reordering UI; order is assigned when content is added.
 - No local upload storage, scheduled campaigns, audience targeting, or web dashboard.
-- Unconfirmed admin drafts are in memory and are intentionally lost on restart; confirmed
-  broadcasts and saved content are durable.
+- An option being composed is in memory only until its English text/caption is entered; at that
+  point it is saved immediately. Confirmed broadcasts and saved content are durable.

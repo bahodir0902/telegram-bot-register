@@ -10,6 +10,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from app.bot.albums import album_collector
 from app.bot.callbacks import (
     AdminCallback,
     BroadcastCallback,
@@ -220,6 +221,16 @@ async def receive_admin_content(
     state: FSMContext,
     language: Language,
 ) -> None:
+    messages = await album_collector.collect(message)
+    if messages is None:
+        return
+    if len(messages) > 1:
+        await message.answer(
+            tr(language, "broadcast_album_unsupported"),
+            reply_markup=upload_cancel_keyboard(language),
+        )
+        return
+    message = messages[0]
     extracted = extract_content(message)
     if extracted is None:
         return

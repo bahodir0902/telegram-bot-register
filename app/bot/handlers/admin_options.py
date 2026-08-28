@@ -7,16 +7,16 @@ from aiogram.enums import ChatType
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from app.bot.albums import album_collector
 from app.bot.callbacks import AdminCallback, AdminOptionCallback, OptionItemCallback
 from app.bot.content_input import (
     content_validation_text,
     extract_content,
-    option_item_input,
+    option_item_inputs,
 )
 from app.bot.filters.admin import AdminFilter, is_admin_user
 from app.bot.keyboards.admin import (
     admin_menu_keyboard,
-    option_creation_more_keyboard,
     option_delete_keyboard,
     option_detail_keyboard,
     option_item_delete_keyboard,
@@ -307,11 +307,17 @@ async def receive_option_name_en(message: Message, state: FSMContext, language: 
     F.video | F.photo | F.document | (F.text & ~F.text.startswith("/")),
 )
 async def receive_option_content(message: Message, state: FSMContext, language: Language) -> None:
-    extracted = extract_content(message)
-    if extracted is None:
+    messages = await album_collector.collect(message)
+    if messages is None:
         return
-    payload, initial_uz = extracted
-    media_type = MediaType(str(payload["media_type"]))
+    extracted_items = [extract_content(item) for item in messages]
+    if any(extracted is None for extracted in extracted_items):
+        return
+    contents = [extracted for extracted in extracted_items if extracted is not None]
+    payloads = [payload for payload, _initial_text in contents]
+    initial_texts = [initial_text for _payload, initial_text in contents]
+    initial_uz = next((value for value in initial_texts if value is not None), None)
+    media_type = MediaType(str(payloads[0]["media_type"]))
     error_text = (
         content_validation_text(initial_uz, media_type, language)
         if initial_uz is not None
@@ -320,7 +326,10 @@ async def receive_option_content(message: Message, state: FSMContext, language: 
     if error_text is not None:
         await message.answer(error_text, reply_markup=upload_cancel_keyboard(language))
         return
-    await state.update_data(**payload)
+    await state.update_data(
+        content_payloads=payloads,
+        media_type=media_type.value,
+    )
     current_state = await state.get_state()
     creating = current_state == AdminOptionCreate.waiting_for_content.state
     if initial_uz is None:
@@ -447,31 +456,32 @@ async def receive_option_text_en(
     data["text_en"] = message.text
     current_state = await state.get_state()
     if current_state == AdminOptionCreate.waiting_for_en.state:
-        draft_items = list(data.get("draft_items", []))
-        draft_items.append(
-            {
-                key: data.get(key)
-                for key in (
-                    "media_type",
-                    "telegram_file_id",
-                    "telegram_file_unique_id",
-                    "original_filename",
-                    "text_uz",
-                    "text_ru",
-                    "text_en",
+        try:
+            item_inputs = option_item_inputs(data)
+            async with session_factory.begin() as session:
+                option = await create_option(
+                    session,
+                    name_uz=str(data["name_uz"]),
+                    name_ru=str(data["name_ru"]),
+                    name_en=str(data["name_en"]),
+                    items=item_inputs,
                 )
-            }
-        )
-        await state.update_data(draft_items=draft_items)
-        await state.set_state(AdminOptionCreate.waiting_for_more)
+        except KeyError, TypeError, ValueError:
+            await state.clear()
+            await message.answer(
+                tr(language, "option_edit_stale"),
+                reply_markup=admin_menu_keyboard(language),
+            )
+            return
+        await state.clear()
         await message.answer(
-            tr(language, "option_item_draft_added", count=len(draft_items)),
-            reply_markup=option_creation_more_keyboard(language),
+            tr(language, "option_created", count=len(item_inputs)),
+            reply_markup=option_detail_keyboard(option, 0, language),
         )
         return
 
     try:
-        item_input = option_item_input(data)
+        item_inputs = option_item_inputs(data)
         mode = str(data["compose_mode"])
         if mode not in {"add", "replace"}:
             raise ValueError("invalid composition mode")
@@ -488,14 +498,26 @@ async def receive_option_text_en(
         return
     async with session_factory.begin() as session:
         if mode == "add":
-            item = await add_option_item(session, option_id, item_input)
+            saved_items = []
+            for item_input in item_inputs:
+                saved_item = await add_option_item(session, option_id, item_input)
+                if saved_item is None:
+                    saved_items = []
+                    break
+                saved_items.append(saved_item)
+            item = saved_items[0] if saved_items else None
         else:
             existing = await get_option_item(session, replace_item_id or 0)
             item = (
-                await replace_option_item(session, existing.id, item_input)
+                await replace_option_item(session, existing.id, item_inputs[0])
                 if existing is not None and existing.option_id == option_id
                 else None
             )
+            if item is not None:
+                for extra_input in item_inputs[1:]:
+                    if await add_option_item(session, option_id, extra_input) is None:
+                        item = None
+                        break
     await state.clear()
     if item is None:
         await message.answer(
@@ -507,56 +529,6 @@ async def receive_option_text_en(
         tr(language, "option_item_saved"),
         reply_markup=option_item_detail_keyboard(item, item_page, option_page, language),
     )
-
-
-@router.callback_query(
-    AdminOptionCallback.filter(F.action.in_({"create_more", "create_finish"})),
-    AdminFilter(),
-)
-async def continue_or_finish_option_create(
-    callback: CallbackQuery,
-    callback_data: AdminOptionCallback,
-    state: FSMContext,
-    language: Language,
-    session_factory: AsyncSessionFactory,
-) -> None:
-    if await state.get_state() != AdminOptionCreate.waiting_for_more.state:
-        await answer_callback_safely(callback, tr(language, "option_edit_stale"), show_alert=True)
-        return
-    await answer_callback_safely(callback)
-    if callback_data.action == "create_more":
-        await state.set_state(AdminOptionCreate.waiting_for_content)
-        if isinstance(callback.message, Message):
-            await edit_text_safely(
-                callback.message,
-                tr(language, "option_content_prompt"),
-                reply_markup=upload_cancel_keyboard(language),
-            )
-        return
-
-    data = await state.get_data()
-    try:
-        draft_items = tuple(option_item_input(item) for item in data["draft_items"])
-        async with session_factory.begin() as session:
-            option = await create_option(
-                session,
-                name_uz=str(data["name_uz"]),
-                name_ru=str(data["name_ru"]),
-                name_en=str(data["name_en"]),
-                items=draft_items,
-            )
-    except KeyError, TypeError, ValueError:
-        await state.clear()
-        if isinstance(callback.message, Message):
-            await edit_text_safely(
-                callback.message,
-                tr(language, "option_edit_stale"),
-                reply_markup=admin_menu_keyboard(language),
-            )
-        return
-    await state.clear()
-    if isinstance(callback.message, Message):
-        await render_option_detail(callback.message, option.id, 0, language, session_factory)
 
 
 @router.callback_query(AdminCallback.filter(F.action == "manage"), AdminFilter())
@@ -1160,19 +1132,6 @@ async def reject_option_content_input(message: Message, language: Language) -> N
 )
 async def reject_option_text_input(message: Message, language: Language) -> None:
     await message.answer(tr(language, "option_text_required"))
-
-
-@router.message(
-    AdminOptionCreate.waiting_for_more,
-    F.chat.type == ChatType.PRIVATE,
-    AdminFilter(),
-    ~F.text.startswith("/"),
-)
-async def remind_option_creation_controls(message: Message, language: Language) -> None:
-    await message.answer(
-        tr(language, "option_use_buttons"),
-        reply_markup=option_creation_more_keyboard(language),
-    )
 
 
 @router.callback_query(AdminOptionCallback.filter())

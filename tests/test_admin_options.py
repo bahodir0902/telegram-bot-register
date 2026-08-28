@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, Chat, Message, User
+from aiogram.types import CallbackQuery, Chat, Message, User, Video
 
+from app.bot.albums import AlbumCollector
 from app.bot.callbacks import AdminOptionCallback, OptionItemCallback
 from app.bot.handlers import admin_options as handler
 from app.bot.states.admin import (
@@ -34,6 +36,30 @@ def make_message(text: str = "value") -> Message:
         chat=Chat(id=10, type="private"),
         from_user=User(id=10, is_bot=False, first_name="Admin"),
         text=text,
+    )
+
+
+def make_video_message(
+    message_id: int,
+    file_id: str,
+    *,
+    caption: str | None,
+    media_group_id: str | None = None,
+) -> Message:
+    return Message(
+        message_id=message_id,
+        date=datetime.now(UTC),
+        chat=Chat(id=10, type="private"),
+        from_user=User(id=10, is_bot=False, first_name="Admin"),
+        video=Video(
+            file_id=file_id,
+            file_unique_id=f"unique-{file_id}",
+            width=100,
+            height=100,
+            duration=1,
+        ),
+        caption=caption,
+        media_group_id=media_group_id,
     )
 
 
@@ -119,16 +145,6 @@ async def test_complete_creation_flow_saves_active_localized_option(
     await handler.receive_option_name_ru(make_message("Русский"), state, Language.EN)
     await handler.receive_option_name_en(make_message("English"), state, Language.EN)
     await complete_one_text_draft(state, Language.EN, database)
-    assert await state.get_state() == AdminOptionCreate.waiting_for_more.state
-
-    callback_data = AdminOptionCallback(action="create_finish", option_id=0, page=0)
-    await handler.continue_or_finish_option_create(
-        make_callback(callback_data.pack()),
-        callback_data,
-        state,
-        Language.EN,
-        database.session_factory,
-    )
 
     async with database.session_factory() as session:
         options = await handler.list_options(session, page=0)
@@ -147,35 +163,85 @@ async def test_complete_creation_flow_saves_active_localized_option(
     assert await state.get_state() is None
 
 
-async def test_creation_can_accumulate_multiple_items_before_single_commit(
+async def test_single_video_is_saved_immediately_after_english_caption(
     monkeypatch, database: Database
 ) -> None:
-    patch_ui(monkeypatch)
+    answers, _, _ = patch_ui(monkeypatch)
     state = make_state()
     await state.update_data(name_uz="uz", name_ru="ru", name_en="en")
     await state.set_state(AdminOptionCreate.waiting_for_content)
-    await complete_one_text_draft(state, Language.EN, database)
-    more = AdminOptionCallback(action="create_more", option_id=0, page=0)
-    await handler.continue_or_finish_option_create(
-        make_callback(more.pack()),
-        more,
+
+    await handler.receive_option_content(
+        make_video_message(10, "single-video", caption=None),
         state,
         Language.EN,
-        database.session_factory,
     )
-    await complete_one_text_draft(state, Language.EN, database)
-    finish = AdminOptionCallback(action="create_finish", option_id=0, page=0)
-    await handler.continue_or_finish_option_create(
-        make_callback(finish.pack()),
-        finish,
-        state,
-        Language.EN,
-        database.session_factory,
+    await handler.receive_option_text_uz(make_message("Uzbek caption"), state, Language.EN)
+    await handler.receive_option_text_ru(make_message("Russian caption"), state, Language.EN)
+    await handler.receive_option_text_en(
+        make_message("English caption"), state, Language.EN, database.session_factory
+    )
+
+    async with database.session_factory() as session:
+        options = await handler.list_options(session, page=0)
+        items = await get_option_items(session, options.items[0].id)
+    assert options.total == 1
+    assert len(items) == 1
+    assert items[0].telegram_file_id == "single-video"
+    assert (items[0].text_uz, items[0].text_ru, items[0].text_en) == (
+        "Uzbek caption",
+        "Russian caption",
+        "English caption",
+    )
+    assert await state.get_state() is None
+    assert any("saved immediately" in text.lower() for text, _kwargs in answers)
+
+
+async def test_media_album_is_collected_once_and_saved_as_multiple_items(
+    monkeypatch, database: Database
+) -> None:
+    answers, _, _ = patch_ui(monkeypatch)
+    monkeypatch.setattr(handler, "album_collector", AlbumCollector(debounce_seconds=0.01))
+    state = make_state()
+    await state.update_data(name_uz="uz", name_ru="ru", name_en="en")
+    await state.set_state(AdminOptionCreate.waiting_for_content)
+    await asyncio.gather(
+        handler.receive_option_content(
+            make_video_message(
+                10,
+                "video-one",
+                caption="Uzbek caption",
+                media_group_id="album-1",
+            ),
+            state,
+            Language.EN,
+        ),
+        handler.receive_option_content(
+            make_video_message(
+                11,
+                "video-two",
+                caption=None,
+                media_group_id="album-1",
+            ),
+            state,
+            Language.EN,
+        ),
+    )
+    assert await state.get_state() == AdminOptionCreate.waiting_for_ru.state
+    assert sum("Russian" in text for text, _kwargs in answers) == 1
+    await handler.receive_option_text_ru(make_message("Russian caption"), state, Language.EN)
+    await handler.receive_option_text_en(
+        make_message("English caption"), state, Language.EN, database.session_factory
     )
     async with database.session_factory() as session:
         option = (await handler.list_options(session, page=0)).items[0]
         items = await get_option_items(session, option.id)
     assert len(items) == 2
+    assert [item.telegram_file_id for item in items] == ["video-one", "video-two"]
+    assert all(item.text_uz == "Uzbek caption" for item in items)
+    assert all(item.text_ru == "Russian caption" for item in items)
+    assert all(item.text_en == "English caption" for item in items)
+    assert await state.get_state() is None
 
 
 @pytest.mark.parametrize("invalid", ["", "   ", "x" * 65])
@@ -197,22 +263,6 @@ async def test_oversized_draft_content_does_not_advance_state(monkeypatch) -> No
     await handler.receive_option_content(make_message("x" * 4097), state, Language.EN)
     assert await state.get_state() == AdminOptionCreate.waiting_for_content.state
     assert any("4096" in text for text, _ in answers)
-
-
-async def test_finish_callback_rejects_missing_or_stale_draft(
-    monkeypatch, database: Database
-) -> None:
-    _, _, callbacks = patch_ui(monkeypatch)
-    state = make_state()
-    finish = AdminOptionCallback(action="create_finish", option_id=0, page=0)
-    await handler.continue_or_finish_option_create(
-        make_callback(finish.pack()),
-        finish,
-        state,
-        Language.EN,
-        database.session_factory,
-    )
-    assert callbacks[-1][1]
 
 
 @pytest.mark.parametrize("language", list(Language))
@@ -610,9 +660,3 @@ async def test_corrupt_final_content_state_is_recovered(monkeypatch, database: D
     )
     assert await state.get_state() is None
     assert answers and "no longer valid" in answers[-1][0].lower()
-
-
-async def test_waiting_for_more_rejects_free_text_with_controls(monkeypatch) -> None:
-    answers, _, _ = patch_ui(monkeypatch)
-    await handler.remind_option_creation_controls(make_message("unexpected"), Language.EN)
-    assert answers[-1][1].get("reply_markup") is not None

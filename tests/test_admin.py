@@ -1,11 +1,13 @@
+import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Chat, Message, User
+from aiogram.types import Chat, Message, User, Video
 
+from app.bot.albums import AlbumCollector
 from app.bot.filters.admin import AdminFilter, is_admin_user
 from app.bot.handlers import admin as admin_handler
 from app.bot.states.admin import AdminBroadcast
@@ -31,6 +33,23 @@ def make_admin_message(text: str) -> Message:
         chat=Chat(id=10, type="private"),
         from_user=User(id=10, is_bot=False, first_name="Admin"),
         text=text,
+    )
+
+
+def make_admin_video(message_id: int, group_id: str) -> Message:
+    return Message(
+        message_id=message_id,
+        date=datetime.now(UTC),
+        chat=Chat(id=10, type="private"),
+        from_user=User(id=10, is_bot=False, first_name="Admin"),
+        video=Video(
+            file_id=f"file-{message_id}",
+            file_unique_id=f"unique-{message_id}",
+            width=100,
+            height=100,
+            duration=1,
+        ),
+        media_group_id=group_id,
     )
 
 
@@ -80,3 +99,22 @@ async def test_broadcast_oversized_text_is_rejected_without_losing_state(monkeyp
 
     assert await state.get_state() == AdminBroadcast.waiting_for_content.state
     assert any("4096" in text for text in answers)
+
+
+async def test_broadcast_album_is_rejected_once_without_corrupting_state(monkeypatch) -> None:
+    answers: list[str] = []
+
+    async def answer(_message, text, **_kwargs) -> None:
+        answers.append(text)
+
+    monkeypatch.setattr(Message, "answer", answer)
+    monkeypatch.setattr(admin_handler, "album_collector", AlbumCollector(debounce_seconds=0.01))
+    state = make_state()
+    await state.set_state(AdminBroadcast.waiting_for_content)
+    await asyncio.gather(
+        admin_handler.receive_admin_content(make_admin_video(1, "album"), state, Language.EN),
+        admin_handler.receive_admin_content(make_admin_video(2, "album"), state, Language.EN),
+    )
+    assert await state.get_state() == AdminBroadcast.waiting_for_content.state
+    assert len(answers) == 1
+    assert "album" in answers[0].lower()

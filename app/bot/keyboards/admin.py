@@ -451,33 +451,6 @@ def option_item_delete_keyboard(
     )
 
 
-def option_creation_more_keyboard(language: Language) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=tr(language, "option_add_more"),
-                    callback_data=AdminOptionCallback(
-                        action="create_more", option_id=0, page=0
-                    ).pack(),
-                ),
-                InlineKeyboardButton(
-                    text=tr(language, "option_finish"),
-                    callback_data=AdminOptionCallback(
-                        action="create_finish", option_id=0, page=0
-                    ).pack(),
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=tr(language, "cancel"),
-                    callback_data=AdminCallback(action="menu").pack(),
-                )
-            ],
-        ]
-    )
-
-
 def channel_list_keyboard(result: ChannelPage, language: Language) -> InlineKeyboardMarkup:
     rows = [
         [

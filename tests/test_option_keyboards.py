@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from app.bot.keyboards.admin import (
-    option_creation_more_keyboard,
     option_delete_keyboard,
     option_detail_keyboard,
     option_item_delete_keyboard,
@@ -115,7 +114,6 @@ def test_all_option_admin_keyboards_keep_callback_data_within_telegram_limit() -
         option_items_keyboard(selected_option, item_page, large_page, Language.EN),
         option_item_detail_keyboard(selected_item, large_page, large_page, Language.EN),
         option_item_delete_keyboard(selected_item, large_page, large_page, Language.EN),
-        option_creation_more_keyboard(Language.EN),
     ]
     callbacks = [value for markup in markups for value in callback_values(markup)]
     assert callbacks

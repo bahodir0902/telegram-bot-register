@@ -86,3 +86,21 @@ def option_item_input(data: dict[str, object]) -> OptionItemInput:
         text_ru=str(data["text_ru"]),
         text_en=str(data["text_en"]),
     )
+
+
+def option_item_inputs(data: dict[str, object]) -> tuple[OptionItemInput, ...]:
+    raw_payloads = data.get("content_payloads")
+    if not isinstance(raw_payloads, list) or not raw_payloads:
+        return (option_item_input(data),)
+    items: list[OptionItemInput] = []
+    for raw_payload in raw_payloads:
+        if not isinstance(raw_payload, dict):
+            raise ValueError("invalid content payload")
+        payload = {
+            **raw_payload,
+            "text_uz": data["text_uz"],
+            "text_ru": data["text_ru"],
+            "text_en": data["text_en"],
+        }
+        items.append(option_item_input(payload))
+    return tuple(items)

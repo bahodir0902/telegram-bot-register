@@ -8,6 +8,7 @@ from app.bot.content_input import (
     content_validation_text,
     extract_content,
     option_item_input,
+    option_item_inputs,
 )
 from app.db.models import MediaType
 from app.i18n import Language
@@ -129,6 +130,44 @@ def test_option_item_input_normalizes_serialized_fsm_payload() -> None:
     assert result.media_type is MediaType.PHOTO
     assert result.telegram_file_id == "file"
     assert result.telegram_file_unique_id is None
+
+
+def test_option_item_inputs_expands_album_payloads_with_shared_translations() -> None:
+    items = option_item_inputs(
+        {
+            "content_payloads": [
+                {
+                    "media_type": "video",
+                    "telegram_file_id": "one",
+                    "telegram_file_unique_id": "unique-one",
+                    "original_filename": None,
+                },
+                {
+                    "media_type": "video",
+                    "telegram_file_id": "two",
+                    "telegram_file_unique_id": "unique-two",
+                    "original_filename": None,
+                },
+            ],
+            "text_uz": "uz",
+            "text_ru": "ru",
+            "text_en": "en",
+        }
+    )
+    assert [item.telegram_file_id for item in items] == ["one", "two"]
+    assert all(item.text_uz == "uz" and item.text_ru == "ru" for item in items)
+
+
+@pytest.mark.parametrize("content_payloads", [[], [None], "invalid"])
+def test_option_item_inputs_rejects_invalid_album_payloads(content_payloads) -> None:
+    data = {
+        "content_payloads": content_payloads,
+        "text_uz": "uz",
+        "text_ru": "ru",
+        "text_en": "en",
+    }
+    with pytest.raises((KeyError, ValueError)):
+        option_item_inputs(data)
 
 
 @pytest.mark.parametrize(
