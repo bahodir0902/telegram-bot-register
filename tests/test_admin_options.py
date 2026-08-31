@@ -260,9 +260,9 @@ async def test_oversized_draft_content_does_not_advance_state(monkeypatch) -> No
     answers, _, _ = patch_ui(monkeypatch)
     state = make_state()
     await state.set_state(AdminOptionCreate.waiting_for_content)
-    await handler.receive_option_content(make_message("x" * 4097), state, Language.EN)
+    await handler.receive_option_content(make_message("x" * 10001), state, Language.EN)
     assert await state.get_state() == AdminOptionCreate.waiting_for_content.state
-    assert any("4096" in text for text, _ in answers)
+    assert any("10000" in text for text, _ in answers)
 
 
 @pytest.mark.parametrize("language", list(Language))

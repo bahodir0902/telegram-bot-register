@@ -95,10 +95,10 @@ async def test_broadcast_oversized_text_is_rejected_without_losing_state(monkeyp
     state = make_state()
     await state.set_state(AdminBroadcast.waiting_for_content)
 
-    await admin_handler.receive_admin_content(make_admin_message("x" * 4097), state, Language.EN)
+    await admin_handler.receive_admin_content(make_admin_message("x" * 10001), state, Language.EN)
 
     assert await state.get_state() == AdminBroadcast.waiting_for_content.state
-    assert any("4096" in text for text in answers)
+    assert any("10000" in text for text in answers)
 
 
 async def test_broadcast_album_is_rejected_once_without_corrupting_state(monkeypatch) -> None:
