@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import SendVideo
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import func, select
 
 from app.db.models import ContentOption, MediaType, OptionContentItem
@@ -182,6 +183,48 @@ async def test_send_content_dispatches_every_supported_type_and_escapes_html(
     else:
         assert method.await_args.args == (42, "file-id")
         assert method.await_args.kwargs["caption"] == "&lt;unsafe&gt;"
+
+
+async def test_send_content_splits_long_text_and_attaches_markup_to_last_chunk() -> None:
+    bot = AsyncMock()
+    markup = InlineKeyboardMarkup(inline_keyboard=[])
+
+    await send_content(
+        bot,
+        42,
+        media_type=MediaType.TEXT,
+        telegram_file_id="",
+        text="x" * 10_000,
+        reply_markup=markup,
+    )
+
+    assert [call.args for call in bot.send_message.await_args_list] == [
+        (42, "x" * 4096),
+        (42, "x" * 4096),
+        (42, "x" * 1808),
+    ]
+    assert [call.kwargs for call in bot.send_message.await_args_list] == [
+        {},
+        {},
+        {"reply_markup": markup},
+    ]
+
+
+async def test_send_content_moves_media_content_after_the_caption_limit() -> None:
+    bot = AsyncMock()
+    markup = InlineKeyboardMarkup(inline_keyboard=[])
+
+    await send_content(
+        bot,
+        42,
+        media_type=MediaType.PHOTO,
+        telegram_file_id="file-id",
+        text="x" * 4096,
+        reply_markup=markup,
+    )
+
+    bot.send_photo.assert_awaited_once_with(42, "file-id", caption="x" * 1024)
+    bot.send_message.assert_awaited_once_with(42, "x" * 3072, reply_markup=markup)
 
 
 def test_localized_content_never_silently_falls_back_to_another_authored_language() -> None:

@@ -99,10 +99,10 @@ def test_content_validation_error_is_localized_for_empty_text(language: Language
 @pytest.mark.parametrize(
     ("media_type", "length", "shown_limit"),
     [
-        (MediaType.TEXT, 4097, "4096"),
-        (MediaType.PHOTO, 1025, "1024"),
-        (MediaType.VIDEO, 1025, "1024"),
-        (MediaType.DOCUMENT, 1025, "1024"),
+        (MediaType.TEXT, 10001, "10000"),
+        (MediaType.PHOTO, 4097, "4096"),
+        (MediaType.VIDEO, 4097, "4096"),
+        (MediaType.DOCUMENT, 4097, "4096"),
     ],
 )
 def test_content_validation_reports_type_specific_limit(

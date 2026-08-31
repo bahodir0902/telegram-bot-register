@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from html import escape
 from typing import Protocol
 
@@ -9,8 +10,10 @@ from aiogram.types import InlineKeyboardMarkup
 from app.db.models import MediaType
 from app.i18n import DEFAULT_LANGUAGE, Language
 
-TEXT_LIMIT = 4096
-CAPTION_LIMIT = 1024
+TEXT_LIMIT = 10_000
+CAPTION_LIMIT = 4096
+TELEGRAM_CAPTION_LIMIT = 1024
+TELEGRAM_MESSAGE_LIMIT = 4096
 
 
 class LocalizedContent(Protocol):
@@ -59,13 +62,58 @@ async def send_content(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:
-    rendered = escape(text)
     markup = {"reply_markup": reply_markup} if reply_markup is not None else {}
     if media_type == MediaType.TEXT:
-        await bot.send_message(chat_id, rendered, **markup)
+        await _send_text_chunks(bot, chat_id, text, markup=markup)
     elif media_type == MediaType.VIDEO:
-        await bot.send_video(chat_id, telegram_file_id, caption=rendered, **markup)
+        await _send_media_with_content(
+            bot.send_video, bot, chat_id, telegram_file_id, text, markup=markup
+        )
     elif media_type == MediaType.PHOTO:
-        await bot.send_photo(chat_id, telegram_file_id, caption=rendered, **markup)
+        await _send_media_with_content(
+            bot.send_photo, bot, chat_id, telegram_file_id, text, markup=markup
+        )
     else:
-        await bot.send_document(chat_id, telegram_file_id, caption=rendered, **markup)
+        await _send_media_with_content(
+            bot.send_document, bot, chat_id, telegram_file_id, text, markup=markup
+        )
+
+
+async def _send_text_chunks(
+    bot: Bot,
+    chat_id: int,
+    text: str,
+    *,
+    markup: dict[str, InlineKeyboardMarkup],
+) -> None:
+    chunks = [
+        text[offset : offset + TELEGRAM_MESSAGE_LIMIT]
+        for offset in range(0, len(text), TELEGRAM_MESSAGE_LIMIT)
+    ]
+    for index, chunk in enumerate(chunks):
+        await bot.send_message(
+            chat_id,
+            escape(chunk),
+            **(markup if index == len(chunks) - 1 else {}),
+        )
+
+
+async def _send_media_with_content(
+    send_media: Callable[..., Awaitable[object]],
+    bot: Bot,
+    chat_id: int,
+    telegram_file_id: str,
+    text: str,
+    *,
+    markup: dict[str, InlineKeyboardMarkup],
+) -> None:
+    caption = text[:TELEGRAM_CAPTION_LIMIT]
+    remaining_text = text[TELEGRAM_CAPTION_LIMIT:]
+    await send_media(
+        chat_id,
+        telegram_file_id,
+        caption=escape(caption),
+        **(markup if not remaining_text else {}),
+    )
+    if remaining_text:
+        await _send_text_chunks(bot, chat_id, remaining_text, markup=markup)
