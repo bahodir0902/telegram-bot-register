@@ -40,7 +40,10 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-RUN python -m pip uninstall --yes pip \
+RUN apt-get update \
+    && apt-get upgrade --yes \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall --yes pip \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app \
         --shell /usr/sbin/nologin app \
