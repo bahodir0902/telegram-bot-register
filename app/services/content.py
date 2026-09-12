@@ -61,8 +61,13 @@ async def send_content(
     telegram_file_id: str,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
+    protect_content: bool = False,
 ) -> None:
-    markup = {"reply_markup": reply_markup} if reply_markup is not None else {}
+    markup: dict[str, object] = {}
+    if protect_content:
+        markup["protect_content"] = True
+    if reply_markup is not None:
+        markup["reply_markup"] = reply_markup
     if media_type == MediaType.TEXT:
         await _send_text_chunks(bot, chat_id, text, markup=markup)
     elif media_type == MediaType.VIDEO:
@@ -84,7 +89,7 @@ async def _send_text_chunks(
     chat_id: int,
     text: str,
     *,
-    markup: dict[str, InlineKeyboardMarkup],
+    markup: dict[str, object],
 ) -> None:
     chunks = [
         text[offset : offset + TELEGRAM_MESSAGE_LIMIT]
@@ -105,7 +110,7 @@ async def _send_media_with_content(
     telegram_file_id: str,
     text: str,
     *,
-    markup: dict[str, InlineKeyboardMarkup],
+    markup: dict[str, object],
 ) -> None:
     caption = text[:TELEGRAM_CAPTION_LIMIT]
     remaining_text = text[TELEGRAM_CAPTION_LIMIT:]

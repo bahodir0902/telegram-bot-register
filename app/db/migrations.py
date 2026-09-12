@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.db.base import Base
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 LEGACY_TABLES = frozenset({"media", "users"})
 EXPECTED_TABLES = frozenset(
     {
@@ -13,8 +13,11 @@ EXPECTED_TABLES = frozenset(
         "broadcasts",
         "channels",
         "content_options",
+        "engagement_events",
         "option_content_items",
         "users",
+        "video_lesson_videos",
+        "video_lessons",
     }
 )
 EXPECTED_COLUMNS = {
@@ -30,6 +33,10 @@ EXPECTED_COLUMNS = {
             "phone_verified_at",
             "subscription_verified_at",
             "subscription_prompt_message_id",
+            "first_started_at",
+            "last_started_at",
+            "first_start_source",
+            "last_start_source",
             "is_reachable",
             "unreachable_at",
             "created_at",
@@ -102,10 +109,50 @@ EXPECTED_COLUMNS = {
             "updated_at",
         }
     ),
+    "video_lessons": frozenset(
+        {
+            "id",
+            "title_uz",
+            "title_ru",
+            "title_en",
+            "text_uz",
+            "text_ru",
+            "text_en",
+            "is_active",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    "video_lesson_videos": frozenset(
+        {
+            "id",
+            "lesson_id",
+            "telegram_file_id",
+            "telegram_file_unique_id",
+            "original_filename",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    "engagement_events": frozenset({"id", "user_id", "kind", "target_id", "created_at"}),
+}
+
+V3_EXPECTED_COLUMNS = {
+    table: columns
+    for table, columns in EXPECTED_COLUMNS.items()
+    if table not in {"video_lessons", "video_lesson_videos", "engagement_events"}
+}
+V3_EXPECTED_COLUMNS["users"] = V3_EXPECTED_COLUMNS["users"] - {
+    "first_started_at",
+    "last_started_at",
+    "first_start_source",
+    "last_start_source",
 }
 
 V2_EXPECTED_COLUMNS = {
-    "users": EXPECTED_COLUMNS["users"],
+    "users": V3_EXPECTED_COLUMNS["users"],
     "channels": EXPECTED_COLUMNS["channels"],
     "media": frozenset(
         {
@@ -296,6 +343,36 @@ async def migrate_schema(connection: AsyncConnection) -> None:
                 (imported_option_id,),
             )
         await connection.exec_driver_sql("DROP TABLE media")
+        await connection.exec_driver_sql("PRAGMA user_version=3")
+        version = 3
+
+    if version == 3:
+        await _validate_columns(connection, V3_EXPECTED_COLUMNS)
+        user_columns = await _column_names(connection, "users")
+        additions = {
+            "first_started_at": "DATETIME",
+            "last_started_at": "DATETIME",
+            "first_start_source": "VARCHAR(128)",
+            "last_start_source": "VARCHAR(128)",
+        }
+        for column, sql_type in additions.items():
+            if column not in user_columns:
+                await connection.exec_driver_sql(
+                    f'ALTER TABLE users ADD COLUMN "{column}" {sql_type}'
+                )
+        await connection.exec_driver_sql(
+            "UPDATE users SET "
+            "first_started_at = COALESCE(first_started_at, created_at), "
+            "last_started_at = COALESCE(last_started_at, created_at), "
+            "first_start_source = COALESCE(first_start_source, 'legacy'), "
+            "last_start_source = COALESCE(last_start_source, 'legacy')"
+        )
+        for table in ("video_lessons", "video_lesson_videos", "engagement_events"):
+            await connection.run_sync(
+                lambda sync_connection, table_name=table: Base.metadata.tables[table_name].create(
+                    sync_connection, checkfirst=True
+                )
+            )
         await connection.exec_driver_sql(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     await _validate_current_schema(connection)

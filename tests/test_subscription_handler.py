@@ -703,7 +703,7 @@ async def test_render_option_menu_handles_empty_and_normalized_page(
     message = make_callback().message
     assert isinstance(message, Message)
     await handler.render_option_menu(message, 99, Language.EN, database.session_factory)
-    assert "no active options" in edits[-1].lower()
+    assert "no active recipes" in edits[-1].lower()
     await seed_option(database, "one")
     await handler.render_option_menu(message, 99, Language.EN, database.session_factory)
     assert "Page: 1/1" in edits[-1]

@@ -1,9 +1,10 @@
 # Telegram Registration Bot
 
 A small multilingual Telegram-native bot that verifies a user's own phone contact, checks
-membership in every administrator-managed channel, and presents administrator-defined options.
-Each option delivers its own localized text/media content. Administrators manage options,
-channels, and broadcasts entirely through the bot.
+membership in every administrator-managed channel, and presents administrator-defined recipes
+and video lessons. Each recipe delivers localized content, while each lesson contains one shared
+localized title/description and one or more ordered videos. Administrators manage recipes,
+lessons, statistics, channels, and broadcasts entirely through the bot.
 
 ## Architecture
 
@@ -15,8 +16,8 @@ The application is one asynchronous Python process using:
 - pydantic-settings for validated environment configuration;
 - aiogram's in-memory FSM while an administrator is composing content or editing channels.
 
-Durable onboarding, channel, option/content, and confirmed-broadcast state lives in SQLite. Each
-option has Uzbek, Russian, and English button names and one or more ordered content items with
+Durable onboarding, channel, recipe/content, lesson, engagement, and confirmed-broadcast state
+lives in SQLite. Each recipe has Uzbek, Russian, and English button names and ordered content with
 localized text/captions. A background worker sends one broadcast at a time and resumes pending
 recipients after restart. Telegram media is stored by reusable `file_id`; the bot does not
 download and re-upload it. `MEDIA_ROOT` is created for future local-file use but is not required
@@ -204,20 +205,23 @@ invite link for `CHANNEL_URL`.
 2. The bot sends a localized welcome. An unverified user receives a native `request_contact`
    reply keyboard.
 3. The bot accepts the contact only when `contact.user_id` matches the sender, stores the
-   normalized phone number, and replaces the contact keyboard with persistent language and option
-   list buttons.
-4. `Til / Язык / Language` and `/language` allow switching at any time. The localized option-list
-   button automatically rechecks all managed channels and opens the current active options without
+   normalized phone number, and replaces the contact keyboard with persistent language, recipe,
+   and video-lesson buttons.
+4. `Til / Язык / Language` and `/language` allow switching at any time. The localized recipe and
+   video-lesson buttons automatically recheck all managed channels and open active content without
    requiring `/start`; a failed check restores the normal subscription gate.
 5. A separate message asks the user to join every managed channel.
 6. `Check subscription` is answered immediately and performs live Telegram membership lookups.
 7. A failed or partial check updates the existing prompt and keeps its buttons. A successful check
-   replaces the same prompt with up to eight active option buttons per page. It does not
+   replaces the same prompt with up to eight active recipe buttons per page. It does not
    automatically send content.
-8. Pressing an option performs a fresh all-channel membership check. If membership still passes,
-   the bot sends that option's content in `(sort_order, id)` order using the user's selected
+8. Pressing a recipe performs a fresh all-channel membership check. If membership still passes,
+   the bot sends that recipe's content in `(sort_order, id)` order using the user's selected
    language. A missing subscription restores the channel gate; a changed channel list requires a
    fresh check.
+9. Pressing a video lesson also performs a fresh membership check, then sends every lesson video
+   in order with forwarding/saving protection. The localized lesson title and shared description
+   appear once on the first successfully delivered video.
 
 The current prompt message ID is persisted and atomically claimed, so double-clicking the same
 successful check does not render duplicate menus. Repeating `/start` never creates a duplicate
@@ -227,16 +231,22 @@ user and creates a fresh subscription prompt so membership can be checked again.
 
 Send `/admin` in a private chat from an ID listed in `ADMIN_IDS`.
 
-- **Add option** collects the button name in Uzbek, Russian, and English, then accepts text, one
+- **Add recipe** collects the button name in Uzbek, Russian, and English, then accepts text, one
   media file, or a Telegram media album. After the English text/caption is entered, the option is
-  saved immediately—there is no second confirmation button. Every album member becomes an ordered
-  content item using the collected three-language caption. Add further content later through the
-  saved option's content manager.
-- **Manage options** shows five options per page. An administrator can inspect, reorder, enable,
-  disable, rename in any language, or delete an option. Each option's content list is separately
+  saved immediately—there is no second confirmation button. Every album member becomes ordered
+  content using the collected three-language caption. Add further content later through the
+  saved recipe's content manager.
+- **Manage recipes** shows five recipes per page. An administrator can inspect, reorder, enable,
+  disable, rename in any language, or delete a recipe. Each recipe's content list is separately
   paginated and supports adding, replacing, reordering, editing all three localized texts, and
-  confirmed deletion. Deleting the final item automatically disables its option; an empty option
+  confirmed deletion. Deleting the final item automatically disables its recipe; an empty recipe
   cannot be enabled.
+- **Video lessons** collects one title and one shared description in all three languages, then one
+  or more videos as individual messages or an album. Saving is unavailable until a video exists.
+  Lessons and videos can be previewed, edited, replaced, reordered, enabled, disabled, or deleted.
+- **Statistics** shows registration, verification, reachability, language, source, recipe-delivery,
+  and lesson-view metrics. Administrators can inspect individual users and download all users as
+  an Excel-safe UTF-8 CSV or formatted XLSX workbook.
 - **Send broadcast** collects the same supported content and three language variants, shows a
   preview, and asks for confirmation. Confirmation snapshots all currently reachable users.
   Sending continues in the background, with refreshable progress and cancellation for recipients
@@ -244,24 +254,26 @@ Send `/admin` in a private chat from an ID listed in `ADMIN_IDS`.
 - **Channels** shows five records per page. Administrators can add channels, replace their
   Telegram ID or join link, and delete records with confirmation. IDs are validated live and
   titles are fetched from Telegram. The final channel cannot be deleted.
-- `/cancel` exits an active option, broadcast, or channel-editing prompt.
+- `/cancel` exits an active recipe, lesson, broadcast, or channel-editing prompt.
 
 Every administrator command and callback checks the current sender ID against `ADMIN_IDS`.
 Callback data never grants authorization by itself.
 
 ## Database
 
-`users` stores the Telegram identity, selected language, profile/verification data, current
-subscription prompt ID, and whether Telegram still considers the user reachable. `channels`
-stores the Telegram identifier, fetched title, join URL, and timestamps. `content_options` stores
-localized button names, active state, and ordering. `option_content_items` stores the option-owned
+`users` stores the Telegram identity, start timestamps/source, selected language,
+profile/verification data, current subscription prompt ID, and reachability. `channels` stores the
+Telegram identifier, fetched title, join URL, and timestamps. `content_options` stores localized
+recipe button names, active state, and ordering. `option_content_items` stores the recipe-owned
 text or Telegram file references, three localized text/caption variants, and per-option ordering.
+`video_lessons` stores shared localized titles/descriptions, while `video_lesson_videos` stores
+their ordered Telegram videos. `engagement_events` records successful recipe and lesson delivery.
 `broadcasts` and `broadcast_recipients` persist confirmed jobs, immutable audience snapshots,
 retries, progress, and cancellation state.
 
 The schema uses versioned SQLite migrations through `PRAGMA user_version`. This release
 upgrades the original users/media schema in place. Existing global content is preserved inside one
-disabled **Imported content** option so an administrator can rename, review, and explicitly enable
+disabled **Imported content** recipe so an administrator can rename, review, and explicitly enable
 it. A database with an unknown future version or an incomplete schema is rejected rather than
 silently repaired.
 
@@ -302,5 +314,6 @@ Tests mock Telegram network boundaries and use temporary SQLite databases.
 - Telegram has no idempotency key for sends, so a process loss after Telegram accepts a broadcast
   message but before SQLite records success can duplicate that one recipient on recovery.
 - No local upload storage, scheduled campaigns, audience targeting, or web dashboard.
-- An option being composed is in memory only until its English text/caption is entered; at that
+- A recipe being composed is in memory only until its English text/caption is entered; at that
   point it is saved immediately. Confirmed broadcasts and saved content are durable.
+- A new video lesson draft is in memory until the administrator explicitly saves it.

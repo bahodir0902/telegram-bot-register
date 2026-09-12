@@ -26,6 +26,28 @@ class AdminOptionItemTextEdit(StatesGroup):
     waiting_for_value = State()
 
 
+class AdminLessonCreate(StatesGroup):
+    waiting_for_title_uz = State()
+    waiting_for_title_ru = State()
+    waiting_for_title_en = State()
+    waiting_for_text_uz = State()
+    waiting_for_text_ru = State()
+    waiting_for_text_en = State()
+    waiting_for_videos = State()
+
+
+class AdminLessonEdit(StatesGroup):
+    waiting_for_value = State()
+
+
+class AdminLessonVideoAdd(StatesGroup):
+    waiting_for_videos = State()
+
+
+class AdminLessonVideoReplace(StatesGroup):
+    waiting_for_video = State()
+
+
 class AdminBroadcast(StatesGroup):
     waiting_for_content = State()
     waiting_for_uz = State()

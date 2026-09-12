@@ -67,6 +67,34 @@ async def get_user(session: AsyncSession, telegram_id: int) -> User | None:
     return await session.scalar(select(User).where(User.telegram_id == telegram_id))
 
 
+def normalize_start_source(value: str | None) -> str:
+    cleaned = (value or "").strip()
+    return "direct" if not cleaned else f"payload:{cleaned[:120]}"
+
+
+def display_start_source(value: str | None) -> str:
+    if value is None or value == "legacy":
+        return "unknown"
+    if value == "direct":
+        return "direct"
+    return value.removeprefix("payload:")
+
+
+async def record_user_start(
+    session: AsyncSession, telegram_id: int, start_parameter: str | None
+) -> None:
+    user = await get_user(session, telegram_id)
+    if user is None:
+        return
+    now = datetime.now(UTC)
+    source = normalize_start_source(start_parameter)
+    if user.first_started_at is None:
+        user.first_started_at = now
+        user.first_start_source = source
+    user.last_started_at = now
+    user.last_start_source = source
+
+
 async def get_user_language(session: AsyncSession, telegram_id: int) -> Language:
     value = await session.scalar(select(User.language_code).where(User.telegram_id == telegram_id))
     return value or DEFAULT_LANGUAGE

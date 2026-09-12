@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from app.bot.callbacks import SubscriptionCallback, UserOptionCallback
 from app.bot.keyboards.user import options_keyboard, subscription_keyboard
 from app.bot.messages import answer_callback_safely, edit_text_safely
-from app.db.models import Channel
+from app.db.models import Channel, EngagementKind
 from app.db.session import AsyncSessionFactory
 from app.i18n import Language, tr, translated_values
 from app.services.channels import channel_signature, get_channels
@@ -21,6 +21,7 @@ from app.services.options import (
     get_option_items,
     list_options,
 )
+from app.services.statistics import record_engagement
 from app.services.subscription import check_subscriptions
 from app.services.users import (
     claim_subscription_prompt,
@@ -364,6 +365,14 @@ async def select_option(
     async with session_factory.begin() as session:
         await mark_subscription_verified(session, sender.id)
     report = await deliver_option_items(bot, sender.id, current_items, language)
+    if report.sent:
+        async with session_factory.begin() as session:
+            await record_engagement(
+                session,
+                telegram_id=sender.id,
+                kind=EngagementKind.RECIPE,
+                target_id=current_option.id,
+            )
     if report.sent == 0:
         await message.answer(tr(language, "option_delivery_failed"))
     elif report.failed:

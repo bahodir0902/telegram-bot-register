@@ -60,6 +60,12 @@ async def test_legacy_database_is_upgraded_without_losing_data(tmp_path) -> None
         columns = {row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
         assert "language_code" in columns
         assert {"is_reachable", "unreachable_at"}.issubset(columns)
+        assert {
+            "first_started_at",
+            "last_started_at",
+            "first_start_source",
+            "last_start_source",
+        }.issubset(columns)
         assert not connection.execute(
             "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='media'"
         ).fetchone()
@@ -77,6 +83,15 @@ async def test_legacy_database_is_upgraded_without_losing_data(tmp_path) -> None
         ).fetchone()
         assert connection.execute(
             "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='option_content_items'"
+        ).fetchone()
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='video_lessons'"
+        ).fetchone()
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='video_lesson_videos'"
+        ).fetchone()
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='engagement_events'"
         ).fetchone()
         imported = connection.execute("SELECT name_en, is_active FROM content_options").fetchone()
         assert imported == ("Imported content", 0)

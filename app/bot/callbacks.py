@@ -19,6 +19,12 @@ class UserOptionCallback(CallbackData, prefix="choice"):
     page: int
 
 
+class UserLessonCallback(CallbackData, prefix="lesson"):
+    action: str
+    lesson_id: int
+    page: int
+
+
 class AdminOptionCallback(CallbackData, prefix="option"):
     action: str
     option_id: int
@@ -31,6 +37,26 @@ class OptionItemCallback(CallbackData, prefix="item"):
     option_id: int
     page: int
     option_page: int
+
+
+class AdminLessonCallback(CallbackData, prefix="adminlesson"):
+    action: str
+    lesson_id: int
+    page: int
+
+
+class LessonVideoCallback(CallbackData, prefix="lessonvideo"):
+    action: str
+    video_id: int
+    lesson_id: int
+    page: int
+    lesson_page: int
+
+
+class StatisticsCallback(CallbackData, prefix="statistics"):
+    action: str
+    user_id: int
+    page: int
 
 
 class ChannelCallback(CallbackData, prefix="channel"):

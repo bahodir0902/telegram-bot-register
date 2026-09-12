@@ -4,10 +4,13 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.callbacks import (
     AdminCallback,
+    AdminLessonCallback,
     AdminOptionCallback,
     BroadcastCallback,
     ChannelCallback,
+    LessonVideoCallback,
     OptionItemCallback,
+    StatisticsCallback,
 )
 from app.db.models import (
     BroadcastStatus,
@@ -15,15 +18,23 @@ from app.db.models import (
     ContentOption,
     MediaType,
     OptionContentItem,
+    VideoLesson,
+    VideoLessonVideo,
 )
 from app.i18n import Language, tr
 from app.services.channels import ChannelPage
 from app.services.content import localized_content_text
+from app.services.lessons import (
+    LessonPage,
+    LessonVideoPage,
+    localized_lesson_title,
+)
 from app.services.options import (
     OptionItemPage,
     OptionPage,
     localized_option_name,
 )
+from app.services.statistics import UserPage
 
 
 def admin_menu_keyboard(language: Language) -> InlineKeyboardMarkup:
@@ -53,6 +64,470 @@ def admin_menu_keyboard(language: Language) -> InlineKeyboardMarkup:
                     callback_data=AdminCallback(action="channels").pack(),
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "admin_manage_lessons"),
+                    callback_data=AdminCallback(action="lessons").pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "admin_statistics"),
+                    callback_data=AdminCallback(action="statistics").pack(),
+                )
+            ],
+        ]
+    )
+
+
+def lesson_draft_keyboard(language: Language, *, can_save: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if can_save:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "lesson_save"),
+                    callback_data=AdminLessonCallback(
+                        action="create_save", lesson_id=0, page=0
+                    ).pack(),
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=tr(language, "back_to_menu"),
+                callback_data=AdminCallback(action="menu").pack(),
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def lesson_list_keyboard(result: LessonPage, language: Language) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=("🟢 " if lesson.is_active else "🔴 ")
+                + localized_lesson_title(lesson, language),
+                callback_data=AdminLessonCallback(
+                    action="view", lesson_id=lesson.id, page=result.page
+                ).pack(),
+            )
+        ]
+        for lesson in result.items
+    ]
+    navigation: list[InlineKeyboardButton] = []
+    if result.page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                text="⬅️",
+                callback_data=AdminLessonCallback(
+                    action="page", lesson_id=0, page=result.page - 1
+                ).pack(),
+            )
+        )
+    if result.page < result.pages - 1:
+        navigation.append(
+            InlineKeyboardButton(
+                text="➡️",
+                callback_data=AdminLessonCallback(
+                    action="page", lesson_id=0, page=result.page + 1
+                ).pack(),
+            )
+        )
+    if navigation:
+        rows.append(navigation)
+    rows.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "lesson_add"),
+                    callback_data=AdminLessonCallback(
+                        action="add", lesson_id=0, page=result.page
+                    ).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "admin_menu_button"),
+                    callback_data=AdminCallback(action="menu").pack(),
+                )
+            ],
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def lesson_detail_keyboard(
+    lesson: VideoLesson, page: int, language: Language
+) -> InlineKeyboardMarkup:
+    toggle = "disable" if lesson.is_active else "enable"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "lesson_videos"),
+                    callback_data=AdminLessonCallback(
+                        action="videos", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text=tr(language, "lesson_preview"),
+                    callback_data=AdminLessonCallback(
+                        action="preview", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🇺🇿 ✏️ {tr(language, 'lesson_title_label')}",
+                    callback_data=AdminLessonCallback(
+                        action="title_uz", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text=f"🇷🇺 ✏️ {tr(language, 'lesson_title_label')}",
+                    callback_data=AdminLessonCallback(
+                        action="title_ru", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text=f"🇬🇧 ✏️ {tr(language, 'lesson_title_label')}",
+                    callback_data=AdminLessonCallback(
+                        action="title_en", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🇺🇿 ✏️ {tr(language, 'lesson_text_label')}",
+                    callback_data=AdminLessonCallback(
+                        action="text_uz", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text=f"🇷🇺 ✏️ {tr(language, 'lesson_text_label')}",
+                    callback_data=AdminLessonCallback(
+                        action="text_ru", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text=f"🇬🇧 ✏️ {tr(language, 'lesson_text_label')}",
+                    callback_data=AdminLessonCallback(
+                        action="text_en", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, toggle),
+                    callback_data=AdminLessonCallback(
+                        action=toggle, lesson_id=lesson.id, page=page
+                    ).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬆️",
+                    callback_data=AdminLessonCallback(
+                        action="up", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text="⬇️",
+                    callback_data=AdminLessonCallback(
+                        action="down", lesson_id=lesson.id, page=page
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "delete"),
+                    callback_data=AdminLessonCallback(
+                        action="delete_request", lesson_id=lesson.id, page=page
+                    ).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "back"),
+                    callback_data=AdminLessonCallback(action="page", lesson_id=0, page=page).pack(),
+                )
+            ],
+        ]
+    )
+
+
+def lesson_delete_keyboard(
+    lesson: VideoLesson, page: int, language: Language
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "confirm_delete"),
+                    callback_data=AdminLessonCallback(
+                        action="delete_confirm", lesson_id=lesson.id, page=page
+                    ).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "cancel"),
+                    callback_data=AdminLessonCallback(
+                        action="view", lesson_id=lesson.id, page=page
+                    ).pack(),
+                )
+            ],
+        ]
+    )
+
+
+def lesson_videos_keyboard(
+    lesson: VideoLesson,
+    result: LessonVideoPage,
+    lesson_page: int,
+    language: Language,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"🎬 {index + 1 + result.page * 8}",
+                callback_data=LessonVideoCallback(
+                    action="view",
+                    video_id=video.id,
+                    lesson_id=lesson.id,
+                    page=result.page,
+                    lesson_page=lesson_page,
+                ).pack(),
+            )
+        ]
+        for index, video in enumerate(result.items)
+    ]
+    navigation: list[InlineKeyboardButton] = []
+    if result.page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                text="⬅️",
+                callback_data=LessonVideoCallback(
+                    action="page",
+                    video_id=0,
+                    lesson_id=lesson.id,
+                    page=result.page - 1,
+                    lesson_page=lesson_page,
+                ).pack(),
+            )
+        )
+    if result.page < result.pages - 1:
+        navigation.append(
+            InlineKeyboardButton(
+                text="➡️",
+                callback_data=LessonVideoCallback(
+                    action="page",
+                    video_id=0,
+                    lesson_id=lesson.id,
+                    page=result.page + 1,
+                    lesson_page=lesson_page,
+                ).pack(),
+            )
+        )
+    if navigation:
+        rows.append(navigation)
+    rows.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "lesson_video_add"),
+                    callback_data=LessonVideoCallback(
+                        action="add",
+                        video_id=0,
+                        lesson_id=lesson.id,
+                        page=result.page,
+                        lesson_page=lesson_page,
+                    ).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "back"),
+                    callback_data=AdminLessonCallback(
+                        action="view", lesson_id=lesson.id, page=lesson_page
+                    ).pack(),
+                )
+            ],
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def lesson_video_detail_keyboard(
+    video: VideoLessonVideo, page: int, lesson_page: int, language: Language
+) -> InlineKeyboardMarkup:
+    data = dict(
+        video_id=video.id,
+        lesson_id=video.lesson_id,
+        page=page,
+        lesson_page=lesson_page,
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "lesson_video_replace"),
+                    callback_data=LessonVideoCallback(action="replace", **data).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬆️", callback_data=LessonVideoCallback(action="up", **data).pack()
+                ),
+                InlineKeyboardButton(
+                    text="⬇️", callback_data=LessonVideoCallback(action="down", **data).pack()
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "delete"),
+                    callback_data=LessonVideoCallback(action="delete_request", **data).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "back"),
+                    callback_data=LessonVideoCallback(
+                        action="page",
+                        video_id=0,
+                        lesson_id=video.lesson_id,
+                        page=page,
+                        lesson_page=lesson_page,
+                    ).pack(),
+                )
+            ],
+        ]
+    )
+
+
+def lesson_video_delete_keyboard(
+    video: VideoLessonVideo, page: int, lesson_page: int, language: Language
+) -> InlineKeyboardMarkup:
+    data = dict(
+        video_id=video.id,
+        lesson_id=video.lesson_id,
+        page=page,
+        lesson_page=lesson_page,
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "confirm_delete"),
+                    callback_data=LessonVideoCallback(action="delete_confirm", **data).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "cancel"),
+                    callback_data=LessonVideoCallback(action="view", **data).pack(),
+                )
+            ],
+        ]
+    )
+
+
+def statistics_keyboard(language: Language) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "statistics_users"),
+                    callback_data=StatisticsCallback(action="users", user_id=0, page=0).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "statistics_export_csv"),
+                    callback_data=StatisticsCallback(action="export_csv", user_id=0, page=0).pack(),
+                ),
+                InlineKeyboardButton(
+                    text=tr(language, "statistics_export_xlsx"),
+                    callback_data=StatisticsCallback(
+                        action="export_xlsx", user_id=0, page=0
+                    ).pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "statistics_refresh"),
+                    callback_data=StatisticsCallback(action="overview", user_id=0, page=0).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "admin_menu_button"),
+                    callback_data=AdminCallback(action="menu").pack(),
+                )
+            ],
+        ]
+    )
+
+
+def statistics_users_keyboard(result: UserPage, language: Language) -> InlineKeyboardMarkup:
+    rows = []
+    for record in result.items:
+        user = record.user
+        name = " ".join(part for part in (user.first_name, user.last_name) if part)
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"👤 {(name or user.username or str(user.telegram_id))[:50]}",
+                    callback_data=StatisticsCallback(
+                        action="view", user_id=user.id, page=result.page
+                    ).pack(),
+                )
+            ]
+        )
+    navigation: list[InlineKeyboardButton] = []
+    if result.page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                text="⬅️",
+                callback_data=StatisticsCallback(
+                    action="users", user_id=0, page=result.page - 1
+                ).pack(),
+            )
+        )
+    if result.page < result.pages - 1:
+        navigation.append(
+            InlineKeyboardButton(
+                text="➡️",
+                callback_data=StatisticsCallback(
+                    action="users", user_id=0, page=result.page + 1
+                ).pack(),
+            )
+        )
+    if navigation:
+        rows.append(navigation)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=tr(language, "back"),
+                callback_data=StatisticsCallback(action="overview", user_id=0, page=0).pack(),
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def statistics_user_detail_keyboard(page: int, language: Language) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(language, "back"),
+                    callback_data=StatisticsCallback(action="users", user_id=0, page=page).pack(),
+                )
+            ]
         ]
     )
 

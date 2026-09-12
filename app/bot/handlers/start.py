@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.enums import ChatType
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import Message
 from aiogram.types import User as TelegramUser
 
@@ -15,7 +15,7 @@ from app.bot.keyboards.user import (
 from app.db.session import AsyncSessionFactory
 from app.i18n import Language, tr
 from app.services.channels import get_channels
-from app.services.users import get_user, set_subscription_prompt, upsert_user
+from app.services.users import get_user, record_user_start, set_subscription_prompt, upsert_user
 
 router = Router(name="start")
 
@@ -76,6 +76,7 @@ async def start_private(
     message: Message,
     language: Language,
     session_factory: AsyncSessionFactory,
+    command: CommandObject | None = None,
 ) -> None:
     sender = message.from_user
     if sender is None:
@@ -89,6 +90,7 @@ async def start_private(
             first_name=sender.first_name,
             last_name=sender.last_name,
         )
+        await record_user_start(session, sender.id, command.args if command is not None else None)
 
     if user.language_code is None:
         await send_language_selector(message, language)

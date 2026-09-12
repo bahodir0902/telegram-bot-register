@@ -30,10 +30,13 @@ def build_dispatcher() -> Dispatcher:
 
     from app.bot.handlers import (
         admin,
+        admin_lessons,
         admin_options,
+        admin_statistics,
         contact,
         errors,
         language,
+        lessons,
         start,
         subscription,
     )
@@ -46,6 +49,9 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.callback_query.outer_middleware(language_middleware)
     dispatcher.include_router(language.router)
     dispatcher.include_router(subscription.router)
+    dispatcher.include_router(lessons.router)
+    dispatcher.include_router(admin_lessons.router)
+    dispatcher.include_router(admin_statistics.router)
     dispatcher.include_router(admin_options.router)
     dispatcher.include_router(admin.router)
     dispatcher.include_router(contact.router)

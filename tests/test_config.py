@@ -23,7 +23,7 @@ def test_configuration_parses_ids_and_paths() -> None:
 
     assert settings.channel_id == -1001234567890
     assert settings.admin_ids == frozenset({123, 456})
-    assert str(settings.database_path) == "data/test.sqlite3"
+    assert settings.database_path.as_posix() == "data/test.sqlite3"
     assert TEST_TOKEN not in repr(settings)
 
 
